@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Register</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header>
+      <div>
+        <img src="image/logo/EAMU.png" alt="EAMU Logo" class="logo" aria-hidden="true" />
+      </div>
+    </header>
+    <main>
+      <section class="intro" aria-label="University description heading">
+        <h1>East Asia Management University</h1>
+        <h2>Student Attendance</h2>
+      </section>
+      <form aria-label="Register form for Administrator">
+        <label style="font-size: 1.5rem">Administrator only</label>
+
+        <div class="name-row">
+          <div class="name-col">
+            <label for="firstname">First Name</label>
+            <input
+              id="firstname"
+              name="firstname"
+              type="text"
+              placeholder="First Name"
+              autocomplete="given-name"
+              required
+              aria-required="true"
+            />
+          </div>
+
+          <div class="name-col">
+            <label for="lastname">Last Name</label>
+            <input
+              id="lastname"
+              name="lastname"
+              type="text"
+              placeholder="Last Name"
+              autocomplete="family-name"
+              required
+              aria-required="true"
+            />
+          </div>
+        </div>
+
+        <label for="userid">User ID</label>
+        <input
+          id="userid"
+          name="userid"
+          type="text"
+          placeholder="UserID"
+          autocomplete="userID"
+          required
+          aria-required="true"
+        />
+
+        <label for="username">Username</label>
+        <input
+          id="username"
+          name="username"
+          type="text"
+          placeholder="Username"
+          autocomplete="username"
+          required
+          aria-required="true"
+        />
+
+        <label for="password">Password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          placeholder="Password"
+          autocomplete="current-password"
+          required
+          aria-required="true"
+        />
+
+        <div class="checkbox-container">
+          <input id="remember" name="remember" type="checkbox" />
+          <label for="remember" style="margin: 0">Remember me</label>
+        </div>
+
+        <button type="submit">Register</button>
+
+        <!-- <p class="forgot-password" aria-live="polite">Forgot password?</p> -->
+
+        <p class="login-text">
+          Already have an account?
+          <a href="login.html" tabindex="0">Sign-in here</a>
+        </p>
+      </form>
+    </main>
+  </body>
+</html>
