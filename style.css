@@ -781,8 +781,6 @@ header .user-role {
 }
 
 /* Table pagination at bottom */
-/* Table pagination at bottom - All elements aligned to left */
-/* Table pagination at bottom - All elements aligned to left */
 .table-pagination {
     display: flex;
     justify-content: flex-start;
@@ -996,6 +994,57 @@ header .user-role {
     font-size: 0.85rem;
     max-height: 200px;
     overflow-y: auto;
+}
+
+/* attendance filter */
+.date-filter-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.date-input {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    min-width: 140px;
+}
+
+.date-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+}
+
+.search-and-date-container {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.date-label {
+    font-weight: 500;
+    color: #333;
+}
+
+.weekend-notice {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    padding: 15px;
+    border-radius: 5px;
+    text-align: center;
+    margin: 20px 0;
+}
+
+@media (max-width: 768px) {
+    .search-and-date-container {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
 }
 
 /*-------------report.php----------------*/

@@ -7,38 +7,54 @@ include '../Includes/session.php';
 // Function to check if today is weekend
 function isWeekend()
 {
-    $dayOfWeek = date('N'); // 1 (Monday) to 7 (Sunday)
-    return ($dayOfWeek >= 6); // 6=Saturday, 7=Sunday
+    $dayOfWeek = date('N');
+    return ($dayOfWeek >= 6);
 }
 
 date_default_timezone_set('Asia/Phnom_Penh');
-$showAttendance = !isWeekend();
 
+// Get selected date from URL parameter, default to today
+$selectedDate = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
+
+// Validate the date format
+if (!DateTime::createFromFormat('Y-m-d', $selectedDate)) {
+    $selectedDate = date('Y-m-d');
+}
+
+// Check if selected date is weekend
+$selectedDateTime = DateTime::createFromFormat('Y-m-d', $selectedDate);
+$dayOfWeek = $selectedDateTime->format('N');
+$isSelectedDateWeekend = ($dayOfWeek >= 6);
+
+$showAttendance = !$isSelectedDateWeekend;
 $rs = null;
 
 if ($showAttendance) {
-    // Check if attendance records exist for today
-    $checkQuery = "SELECT COUNT(*) as count FROM tblAttendance WHERE DATE(markedAt) = CURDATE()";
-    $checkResult = $conn->query($checkQuery);
+    // Check if attendance records exist for selected date
+    $checkQuery = "SELECT COUNT(*) as count FROM tblAttendance WHERE DATE(markedAt) = ?";
+    $checkStmt = $conn->prepare($checkQuery);
+    $checkStmt->bind_param("s", $selectedDate);
+    $checkStmt->execute();
+    $checkResult = $checkStmt->get_result();
 
-    if (!$checkResult) {
-        // Handle error silently or log it
-    } else {
+    if ($checkResult) {
         $row = $checkResult->fetch_assoc();
 
-        if ($row['count'] == 0) {
-            // Fixed: Use NOW() instead of CURDATE() for timestamp
+        if ($row['count'] == 0 && $selectedDate === date('Y-m-d')) {
+            // Only auto-create attendance for today's date
             $insertQuery = "INSERT INTO tblAttendance (studentId, sessionId, attendanceStatus, markedAt)
-                SELECT s.userId, sessions.sessionId, 'present', NOW()
+                SELECT s.userId, sessions.sessionId, 'present', ?
                 FROM tblstudent s
                 CROSS JOIN (SELECT 1 AS sessionId UNION ALL SELECT 2 UNION ALL SELECT 3) sessions
                 WHERE s.isActive = 1";
 
-            $conn->query($insertQuery);
+            $insertStmt = $conn->prepare($insertQuery);
+            $currentDateTime = date('Y-m-d H:i:s');
+            $insertStmt->bind_param("s", $currentDateTime);
+            $insertStmt->execute();
         }
     }
 
-    // Select attendance data for display, including academic year
     $query = "SELECT 
         s.userId AS studentId, 
         s.firstName, 
@@ -48,15 +64,17 @@ if ($showAttendance) {
         a.attendanceStatus, 
         a.markedAt
         FROM tblstudent s
-        LEFT JOIN tblAttendance a ON s.userId = a.studentId AND DATE(a.markedAt) = CURDATE()
+        LEFT JOIN tblAttendance a ON s.userId = a.studentId AND DATE(a.markedAt) = ?
         WHERE s.isActive = 1
         ORDER BY s.firstName, s.userId, a.sessionId";
 
-    $rs = $conn->query($query);
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("s", $selectedDate);
+    $stmt->execute();
+    $rs = $stmt->get_result();
     $allRows = [];
 
     if ($rs && $rs->num_rows > 0) {
-        // Convert mysqli_result to array
         while ($row = $rs->fetch_assoc()) {
             $allRows[] = $row;
         }
@@ -75,65 +93,57 @@ if ($showAttendance) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <style>
-        /* .search-container {
+    <!-- <style>
+        .date-filter-container {
             display: flex;
             align-items: center;
             gap: 10px;
         }
 
-        .search-input {
-            padding: 4px 6px;
+        .date-input {
+            padding: 8px 12px;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
-            width: 250px;
-            transition: border-color 0.3s ease;
+            min-width: 140px;
         }
 
-        input[type="text"] {
-            font-size: 11px;
-        }
-
-        .search-input:focus {
+        .date-input:focus {
             outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+            border-color: #4CAF50;
+            box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
         }
 
-        .search-icon {
-            color: #666;
-            font-size: 16px;
-        }
-
-        .header-row {
+        .search-and-date-container {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            gap: 20px;
+            flex-wrap: wrap;
         }
 
-        .clear-search {
-            background: none;
-            border: none;
-            color: #666;
-            cursor: pointer;
-            padding: 0;
-            margin-left: 5px;
-            font-size: 14px;
-        }
-
-        .clear-search:hover {
+        .date-label {
+            font-weight: 500;
             color: #333;
         }
 
-        .no-results {
+        .weekend-notice {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
             text-align: center;
-            padding: 30px;
-            color: #666;
-            font-style: italic;
-        } */
-    </style>
+            margin: 20px 0;
+        }
+
+        @media (max-width: 768px) {
+            .search-and-date-container {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 15px;
+            }
+        }
+    </style> -->
 </head>
 
 <body>
@@ -148,11 +158,25 @@ if ($showAttendance) {
 
         <div class="list-container">
             <?php if (!$showAttendance): ?>
-                <p>Attendance cannot be marked on weekends.</p>
-            <?php else: ?>
-                <div class="searchbar">
-                    <div class="header-row">
-                        <h2 class="list-title">Daily Attendance</h2>
+                <div class="weekend-notice">
+                    <i class="fas fa-calendar-times" style="font-size: 24px; margin-bottom: 10px;"></i>
+                    <p><strong>Weekend Notice</strong></p>
+                    <p>Attendance cannot be marked on weekends (<?php echo $selectedDateTime->format('l, F j, Y'); ?>).
+                        Please select a weekday to view attendance records.</p>
+                </div>
+            <?php endif; ?>
+
+            <div class="searchbar">
+                <div class="header-row">
+                    <h2 class="list-title">Daily Attendance</h2>
+                    <div class="search-and-date-container">
+                        <div class="date-filter-container">
+                            <label for="dateFilter" class="date-label">
+                                <i class="fas fa-calendar-alt"></i> Date:
+                            </label>
+                            <input type="date" id="dateFilter" class="date-input" value="<?php echo $selectedDate; ?>"
+                                max="<?php echo date('Y-m-d'); ?>">
+                        </div>
                         <div class="search-container">
                             <input type="text" id="studentSearch" class="search-input"
                                 placeholder="Search by student name or ID...">
@@ -161,7 +185,9 @@ if ($showAttendance) {
                             </button>
                         </div>
                     </div>
+                </div>
 
+                <?php if ($showAttendance): ?>
                     <div class="table-wrapper">
                         <table class="student-table" id="attendanceTable">
                             <thead>
@@ -212,33 +238,34 @@ if ($showAttendance) {
                                     // Display the data
                                     if (empty($studentSessions)) {
                                         echo "<tr class='no-data'><td colspan='6' style='text-align:center; padding:20px; color:#666;'>
-                                            No student data available.
-                                        </td></tr>";
+                                        No student data available for " . date('F j, Y', strtotime($selectedDate)) . ".
+                                    </td></tr>";
                                     } else {
                                         foreach ($studentSessions as $studentId => $data) {
                                             echo "<tr class='student-row' data-student-id='" . htmlspecialchars($studentId) . "' data-student-name='" . htmlspecialchars(strtolower($data['name'])) . "'>
-                                                <td>" . htmlspecialchars($studentId) . "</td>
-                                                <td>" . htmlspecialchars($data['name']) . "</td>
-                                                <td>" . htmlspecialchars($data['academicYear']) . "</td>";
+                                            <td>" . htmlspecialchars($studentId) . "</td>
+                                            <td>" . htmlspecialchars($data['name']) . "</td>
+                                            <td>" . htmlspecialchars($data['academicYear']) . "</td>";
 
                                             for ($i = 1; $i <= 3; $i++) {
                                                 $status = isset($data['sessions'][$i]) ? $data['sessions'][$i] : 'present';
                                                 $isAbsent = ($status === 'absent') ? 'checked' : '';
+                                                $isEditable = ($selectedDate === date('Y-m-d')) ? '' : 'disabled';
                                                 echo "<td style='text-align:center;'>
-                                                    <input type='checkbox' 
-                                                           class='absence-checkbox' 
-                                                           data-student='" . htmlspecialchars($studentId) . "' 
-                                                           data-session='{$i}' 
-                                                           {$isAbsent}>
-                                                </td>";
+                                                <input type='checkbox' 
+                                                       class='absence-checkbox' 
+                                                       data-student='" . htmlspecialchars($studentId) . "' 
+                                                       data-session='{$i}' 
+                                                       {$isAbsent} {$isEditable}>
+                                            </td>";
                                             }
                                             echo "</tr>";
                                         }
                                     }
                                 } else {
                                     echo "<tr class='no-data'><td colspan='6' style='text-align:center; padding:20px; color:#666;'>
-                                        No data available.
-                                    </td></tr>";
+                                    No data available for " . date('F j, Y', strtotime($selectedDate)) . ".
+                                </td></tr>";
                                 }
                                 ?>
                             </tbody>
@@ -279,8 +306,8 @@ if ($showAttendance) {
                             </div>
                         </div>
                     </div>
-                </div>
-            <?php endif; ?>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 
@@ -312,6 +339,18 @@ if ($showAttendance) {
         };
 
         $(document).ready(function () {
+            // Date filter handler
+            $('#dateFilter').change(function () {
+                const selectedDate = $(this).val();
+                if (selectedDate) {
+                    // Add loading indicator
+                    $('body').append('<div id="loadingOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;"><div style="background:white;padding:20px;border-radius:8px;text-align:center;"><i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i><br>Loading attendance data...</div></div>');
+
+                    // Navigate to the same page with the selected date
+                    window.location.href = window.location.pathname + '?date=' + selectedDate;
+                }
+            });
+
             // Pagination variables
             let currentPage = 1;
             let rowsPerPage = 10;
@@ -439,7 +478,7 @@ if ($showAttendance) {
                         studentId: studentId,
                         sessionId: sessionId,
                         status: status,
-                        date: new Date().toISOString().slice(0, 10)
+                        date: $('#dateFilter').val() || new Date().toISOString().slice(0, 10)
                     },
                     success: function (response) {
                         checkbox.prop('disabled', false);
@@ -565,6 +604,13 @@ if ($showAttendance) {
             // Main checkbox handler
             $('.absence-checkbox').change(function () {
                 var checkbox = $(this);
+
+                // Check if checkbox is disabled (for past dates)
+                if (checkbox.prop('disabled')) {
+                    showMessage('Cannot modify attendance for past dates.', 'error');
+                    return;
+                }
+
                 var studentId = checkbox.data('student');
                 var sessionId = checkbox.data('session');
                 var isAbsent = checkbox.is(':checked');
