@@ -80,7 +80,7 @@ if (isset($_POST['login'])) {
       <select id="userType" name="userType" required aria-required="true">
         <option value="" disabled selected>Select your role</option>
         <option value="Administrator">Administrator</option>
-        <option value="Lecturer">Lecturer</option>
+        <!-- <option value="Lecturer">Lecturer</option> -->
         <option value="Student">Student</option>
       </select>
 

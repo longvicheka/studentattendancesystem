@@ -16,17 +16,17 @@ CREATE TABLE `tblstudent` (
 INSERT INTO `tblstudent` 
 (`userId`, `firstName`, `lastName`, `email`, `DOB`, `academicYear`, `phoneNumber`, `address`, `password`) 
 VALUES
-(22020001, 'Vicheka', 'Long', 'vicheka.long@gmail.com', '2002-01-15', '2024', '012345678', 'Phnom Penh', SHA2('vicheka@2025', 256)),
-(22020002, 'David', 'Kheang', 'david.kheang@gmail.com', '2001-03-20', '2024', '012345679', 'Phnom Penh', SHA2('david@2025', 256)),
-(22020003, 'Soveha', 'Vat', 'soveha.vat@gmail.com', '2002-06-12', '2024', '012345680', 'Phnom Penh', SHA2('veha@2025', 256)),
-(22020004, 'Yav', 'Sok', 'yav.sok@gmail.com', '2003-02-08', '2024', '012345681', 'Phnom Penh', SHA2('yav@2025', 256)),
-(22020005, 'Sreynit', 'Lay', 'sreynit.lay@gmail.com', '2002-11-30', '2024', '012345682', 'Phnom Penh', SHA2('sreynit@2025', 256)),
-(22020006, 'Kanika', 'Seng', 'kanika.seng@gmail.com', '2001-08-21', '2024', '012345683', 'Phnom Penh', SHA2('kanika@2025', 256)),
-(22020007, 'Thavary', 'Vathna', 'thavary.vathna@gmail.com', '2002-04-25', '2024', '012345684', 'Phnom Penh', SHA2('thavary@2025', 256)),
-(22020008, 'Kirilundi', 'Eav', 'kirilundi.eav@gmail.com', '2002-09-19', '2024', '012345685', 'Phnom Penh', SHA2('lundi@2025', 256)),
-(22020009, 'Sophea', 'Chan', 'sophea.chan@gmail.com', '2003-05-14', '2024', '012345686', 'Phnom Penh', SHA2('sophea@2025', 256)),
-(22020010, 'Chhayheng', 'Koung', 'chhayheng.koung@gmail.com', '2002-12-01', '2024', '012345687', 'Phnom Penh', SHA2('chhayheng@2025', 256)),
-(22020011, 'Rithychey', 'Hongsoth', 'rithychey.hongsoth@gmail.com', '2001-10-17', '2024', '012345688', 'Phnom Penh', SHA2('rithychey@2025', 256));
+(2202001, 'Vicheka', 'Long', 'vicheka.long@gmail.com', '2002-01-15', '2024', '012345678', 'Phnom Penh', SHA2('vicheka@2025', 256)),
+(2202002, 'David', 'Kheang', 'david.kheang@gmail.com', '2001-03-20', '2024', '012345679', 'Phnom Penh', SHA2('david@2025', 256)),
+(2202003, 'Soveha', 'Vat', 'soveha.vat@gmail.com', '2002-06-12', '2024', '012345680', 'Phnom Penh', SHA2('veha@2025', 256)),
+(2202004, 'Yav', 'Sok', 'yav.sok@gmail.com', '2003-02-08', '2024', '012345681', 'Phnom Penh', SHA2('yav@2025', 256)),
+(2202005, 'Sreynit', 'Lay', 'sreynit.lay@gmail.com', '2002-11-30', '2024', '012345682', 'Phnom Penh', SHA2('sreynit@2025', 256)),
+(2202006, 'Kanika', 'Seng', 'kanika.seng@gmail.com', '2001-08-21', '2024', '012345683', 'Phnom Penh', SHA2('kanika@2025', 256)),
+(2202007, 'Thavary', 'Vathna', 'thavary.vathna@gmail.com', '2002-04-25', '2024', '012345684', 'Phnom Penh', SHA2('thavary@2025', 256)),
+(2202008, 'Kirilundi', 'Eav', 'kirilundi.eav@gmail.com', '2002-09-19', '2024', '012345685', 'Phnom Penh', SHA2('lundi@2025', 256)),
+(2202009, 'Sophea', 'Chan', 'sophea.chan@gmail.com', '2003-05-14', '2024', '012345686', 'Phnom Penh', SHA2('sophea@2025', 256)),
+(2202010, 'Chhayheng', 'Koung', 'chhayheng.koung@gmail.com', '2002-12-01', '2024', '012345687', 'Phnom Penh', SHA2('chhayheng@2025', 256)),
+(2202011, 'Rithychey', 'Hongsoth', 'rithychey.hongsoth@gmail.com', '2001-10-17', '2024', '012345688', 'Phnom Penh', SHA2('rithychey@2025', 256));
 
 CREATE TABLE tblattendance (
   attendanceId INT PRIMARY KEY AUTO_INCREMENT,
