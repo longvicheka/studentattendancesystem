@@ -326,7 +326,7 @@ if (isset($_POST['generate_report'])) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
-    <style>
+    <!-- <style>
         .high-attendance { color: #1a7f37; font-weight: 600; }
         .medium-attendance { color: #b58900; font-weight: 600; }
         .low-attendance { color: #b00020; font-weight: 600; }
@@ -336,7 +336,7 @@ if (isset($_POST['generate_report'])) {
         .count-column { text-align:center; }
         .percentage-column { text-align:center; }
         .generate-btn, .action-btn { cursor:pointer; }
-    </style>
+    </style> -->
 </head>
 <body>
     <?php include "Includes/topbar.php"; ?>
