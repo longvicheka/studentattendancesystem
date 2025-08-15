@@ -582,18 +582,6 @@ if ($showAttendance && $isValidSubjectForDate) {
         </div>
     </div>
 
-    <!-- Logout Modal -->
-    <div class="modal-overlay" id="logoutModal" style="display:none;">
-        <div class="modal-box">
-            <h2 style="margin-bottom: 12px">Confirm</h2>
-            <p>Are you sure you want to logout?</p>
-            <div class="modal-buttons">
-                <button class="modal-btn yes" id="yesBtn">Yes</button>
-                <button class="modal-btn cancel" id="cancelBtn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         // Message box functions
         function showMessage(message, type = 'success') {
@@ -631,21 +619,6 @@ if ($showAttendance && $isValidSubjectForDate) {
             const selectedDate = document.getElementById('dateFilter').value;
             window.location.href = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
         });
-
-        // Logout handlers
-        document.querySelectorAll('.logout-link').forEach(function (link) {
-            link.addEventListener('click', function (e) {
-                e.preventDefault();
-                document.getElementById('logoutModal').style.display = 'flex';
-            });
-        });
-
-        document.getElementById('yesBtn').onclick = function () {
-            window.location.href = "../login.php";
-        };
-        document.getElementById('cancelBtn').onclick = function () {
-            document.getElementById('logoutModal').style.display = 'none';
-        };
 
         $(document).ready(function () {
             // --- Pagination Variables ---
