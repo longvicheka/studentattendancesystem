@@ -1,10 +1,9 @@
 <?php
-session_start(); 
+session_start();
 
-if (!isset($_SESSION['userId']))
-{
+if (!isset($_SESSION['studentId']) or !isset($_SESSION['userType'])) {
   echo "<script type = \"text/javascript\">
-  window.location = (\"../index.php\");
+  window.location = (\"../Admin/index.php\");
   </script>";
 
 }

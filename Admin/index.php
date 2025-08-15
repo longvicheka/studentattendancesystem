@@ -1,6 +1,12 @@
 <?php
+session_start();
+if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Administrator') {
+  header("Location: ../index.php");
+  exit();
+}
+
+// include '../Includes/session.php';
 include '../Includes/db.php';
-include '../Includes/session.php';
 
 // Set timezone
 date_default_timezone_set('Asia/Phnom_Penh');
@@ -13,18 +19,21 @@ $totalStudents = $totalStudentsResult ? $totalStudentsResult->fetch_assoc()['tot
 
 // Get today's attendance statistics
 $presentQuery = "SELECT COUNT(DISTINCT a.studentId) as present 
-                 FROM tblAttendance a 
-                 INNER JOIN tblstudent s ON a.studentId = s.userId 
+                 FROM tblattendance a 
+                 INNER JOIN tblstudent s ON a.studentId = s.studentId 
                  WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'present'";
 $presentStmt = $conn->prepare($presentQuery);
+if (!$presentStmt) {
+  die("Prepare failed: " . $conn->error);
+}
 $presentStmt->bind_param("s", $today);
 $presentStmt->execute();
 $presentResult = $presentStmt->get_result();
 $totalPresent = $presentResult ? $presentResult->fetch_assoc()['present'] : 0;
 
 $absentQuery = "SELECT COUNT(DISTINCT a.studentId) as absent 
-                FROM tblAttendance a 
-                INNER JOIN tblstudent s ON a.studentId = s.userId 
+                FROM tblattendance a 
+                INNER JOIN tblstudent s ON a.studentId = s.studentId 
                 WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'absent'";
 $absentStmt = $conn->prepare($absentQuery);
 $absentStmt->bind_param("s", $today);
@@ -33,8 +42,8 @@ $absentResult = $absentStmt->get_result();
 $totalAbsent = $absentResult ? $absentResult->fetch_assoc()['absent'] : 0;
 
 $lateQuery = "SELECT COUNT(DISTINCT a.studentId) as late 
-              FROM tblAttendance a 
-              INNER JOIN tblstudent s ON a.studentId = s.userId 
+              FROM tblattendance a 
+              INNER JOIN tblstudent s ON a.studentId = s.studentId 
               WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'late'";
 $lateStmt = $conn->prepare($lateQuery);
 $lateStmt->bind_param("s", $today);
@@ -48,8 +57,8 @@ $sessionAttendanceQuery = "
         a.sessionId,
         a.attendanceStatus,
         COUNT(*) as count
-    FROM tblAttendance a
-    INNER JOIN tblstudent s ON a.studentId = s.userId
+    FROM tblattendance a
+    INNER JOIN tblstudent s ON a.studentId = s.studentId
     WHERE DATE(a.markedAt) = ? AND s.isActive = 1
     GROUP BY a.sessionId, a.attendanceStatus
     ORDER BY a.sessionId, a.attendanceStatus";
@@ -84,8 +93,8 @@ $yesterday = date('Y-m-d', strtotime('-1 day'));
 
 // Yesterday's present count
 $yesterdayPresentQuery = "SELECT COUNT(DISTINCT a.studentId) as present 
-                         FROM tblAttendance a 
-                         INNER JOIN tblstudent s ON a.studentId = s.userId 
+                         FROM tblattendance a 
+                         INNER JOIN tblstudent s ON a.studentId = s.studentId 
                          WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'present'";
 $yesterdayPresentStmt = $conn->prepare($yesterdayPresentQuery);
 $yesterdayPresentStmt->bind_param("s", $yesterday);
@@ -95,8 +104,8 @@ $yesterdayPresent = $yesterdayPresentResult ? $yesterdayPresentResult->fetch_ass
 
 // Yesterday's absent count
 $yesterdayAbsentQuery = "SELECT COUNT(DISTINCT a.studentId) as absent 
-                        FROM tblAttendance a 
-                        INNER JOIN tblstudent s ON a.studentId = s.userId 
+                        FROM tblattendance a 
+                        INNER JOIN tblstudent s ON a.studentId = s.studentId 
                         WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'absent'";
 $yesterdayAbsentStmt = $conn->prepare($yesterdayAbsentQuery);
 $yesterdayAbsentStmt->bind_param("s", $yesterday);

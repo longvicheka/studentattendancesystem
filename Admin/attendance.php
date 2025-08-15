@@ -1,8 +1,8 @@
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
+session_start();
 include '../Includes/db.php';
-include '../Includes/session.php';
 
 // Function to check if today is weekend
 function isWeekend()
@@ -15,6 +15,8 @@ date_default_timezone_set('Asia/Phnom_Penh');
 
 // Get selected date from URL parameter, default to today
 $selectedDate = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
+// Get selected subject from URL parameter, default to 'all'
+$selectedSubject = isset($_GET['subject']) ? $_GET['subject'] : 'all';
 
 // Validate the date format
 if (!DateTime::createFromFormat('Y-m-d', $selectedDate)) {
@@ -23,16 +25,115 @@ if (!DateTime::createFromFormat('Y-m-d', $selectedDate)) {
 
 // Check if selected date is weekend
 $selectedDateTime = DateTime::createFromFormat('Y-m-d', $selectedDate);
-$dayOfWeek = $selectedDateTime->format('N');
+$dayOfWeek = (int) $selectedDateTime->format('N');
 $isSelectedDateWeekend = ($dayOfWeek >= 6);
 
 $showAttendance = !$isSelectedDateWeekend;
 $rs = null;
 
-if ($showAttendance) {
+// Get subjects available for the selected date (or all subjects if showing all)
+function getSubjectsForDate($conn, $dayOfWeek)
+{
+    $query = "SELECT s.subjectCode, s.subjectName, s.scheduledDay
+              FROM tblsubject s 
+              WHERE s.isActive = 1 
+              AND (s.scheduledDay IS NULL OR s.scheduledDay = '' OR FIND_IN_SET(?, s.scheduledDay) > 0)
+              ORDER BY s.subjectName";
+
+    $stmt = $conn->prepare($query);
+    if (!$stmt) {
+        die("Prepare failed for getSubjectsForDate: " . $conn->error);
+    }
+    $stmt->bind_param("i", $dayOfWeek);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $subjects = [];
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $subjects[] = $row;
+        }
+    }
+    return $subjects;
+}
+
+// Get subjects for the selected day
+$availableSubjects = getSubjectsForDate($conn, $dayOfWeek);
+
+// Check if selected subject is valid for the selected date
+$isValidSubjectForDate = false;
+if ($selectedSubject === 'all') {
+    $isValidSubjectForDate = true;
+} else {
+    foreach ($availableSubjects as $subject) {
+        if ($subject['subjectCode'] == $selectedSubject) {
+            // Check if this subject is scheduled for this day
+            if (isset($subject['scheduledDay']) && !empty($subject['scheduledDay'])) {
+                $scheduledDays = explode(',', $subject['scheduledDay']);
+                $isValidSubjectForDate = in_array($dayOfWeek, $scheduledDays);
+            } else {
+                // If no schedule specified, assume it's available all days
+                $isValidSubjectForDate = true;
+            }
+            break;
+        }
+    }
+}
+
+// Function to create attendance records for students if they don't exist
+function createAttendanceRecords($conn, $selectedDate, $selectedSubject, $dayOfWeek)
+{
+    $currentDateTime = $selectedDate . ' ' . date('H:i:s');
+
+    if ($selectedSubject === 'all') {
+        // Create for all students in subjects scheduled for the selected date
+        $insertQuery = "INSERT IGNORE INTO tblattendance (studentId, subjectCode, sessionId, attendanceStatus, markedAt)
+            SELECT DISTINCT ss.studentId, ss.subjectCode, sessions.sessionId, 'present', ?
+            FROM tblstudentsubject ss
+            INNER JOIN tblstudent s ON ss.studentId = s.studentId
+            INNER JOIN tblsubject sub ON ss.subjectCode = sub.subjectCode
+            CROSS JOIN (SELECT 1 AS sessionId UNION ALL SELECT 2 UNION ALL SELECT 3) sessions
+            WHERE s.isActive = 1 AND sub.isActive = 1
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)";
+
+        $insertStmt = $conn->prepare($insertQuery);
+        if (!$insertStmt) {
+            die("Prepare failed: " . $conn->error . "<br>SQL: " . $insertQuery);
+        }
+        $insertStmt->bind_param("si", $currentDateTime, $dayOfWeek);
+        if (!$insertStmt->execute()) {
+            die("Execute failed: " . $insertStmt->error);
+        }
+    } else {
+        // Create for students in specific subject (if it's scheduled for the selected date)
+        $insertQuery = "INSERT IGNORE INTO tblattendance (studentId, subjectCode, sessionId, attendanceStatus, markedAt)
+            SELECT ss.studentId, ss.subjectCode, sessions.sessionId, 'present', ?
+            FROM tblstudentsubject ss
+            INNER JOIN tblstudent s ON ss.studentId = s.studentId
+            INNER JOIN tblsubject sub ON ss.subjectCode = sub.subjectCode
+            CROSS JOIN (SELECT 1 AS sessionId UNION ALL SELECT 2 UNION ALL SELECT 3) sessions
+            WHERE s.isActive = 1 AND sub.isActive = 1
+            AND ss.subjectCode = ?
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)";
+
+        $insertStmt = $conn->prepare($insertQuery);
+        if (!$insertStmt) {
+            die("Prepare failed: " . $conn->error . "<br>SQL: " . $insertQuery);
+        }
+        $insertStmt->bind_param("ssi", $currentDateTime, $selectedSubject, $dayOfWeek);
+        if (!$insertStmt->execute()) {
+            die("Execute failed: " . $insertStmt->error);
+        }
+    }
+}
+
+if ($showAttendance && $isValidSubjectForDate) {
     // Check if attendance records exist for selected date
-    $checkQuery = "SELECT COUNT(*) as count FROM tblAttendance WHERE DATE(markedAt) = ?";
+    $checkQuery = "SELECT COUNT(*) as count FROM tblattendance WHERE DATE(markedAt) = ?";
     $checkStmt = $conn->prepare($checkQuery);
+    if (!$checkStmt) {
+        die("Prepare failed for check query: " . $conn->error);
+    }
     $checkStmt->bind_param("s", $selectedDate);
     $checkStmt->execute();
     $checkResult = $checkStmt->get_result();
@@ -40,37 +141,81 @@ if ($showAttendance) {
     if ($checkResult) {
         $row = $checkResult->fetch_assoc();
 
+        // Only auto-create attendance for today's date if no records exist
         if ($row['count'] == 0 && $selectedDate === date('Y-m-d')) {
-            // Only auto-create attendance for today's date
-            $insertQuery = "INSERT INTO tblAttendance (studentId, sessionId, attendanceStatus, markedAt)
-                SELECT s.userId, sessions.sessionId, 'present', ?
-                FROM tblstudent s
-                CROSS JOIN (SELECT 1 AS sessionId UNION ALL SELECT 2 UNION ALL SELECT 3) sessions
-                WHERE s.isActive = 1";
-
-            $insertStmt = $conn->prepare($insertQuery);
-            $currentDateTime = date('Y-m-d H:i:s');
-            $insertStmt->bind_param("s", $currentDateTime);
-            $insertStmt->execute();
+            createAttendanceRecords($conn, $selectedDate, $selectedSubject, $dayOfWeek);
         }
     }
 
-    $query = "SELECT 
-        s.userId AS studentId, 
-        s.firstName, 
-        s.lastName,
-        s.academicYear,
-        a.sessionId, 
-        a.attendanceStatus, 
-        a.markedAt
-        FROM tblstudent s
-        LEFT JOIN tblAttendance a ON s.userId = a.studentId AND DATE(a.markedAt) = ?
-        WHERE s.isActive = 1
-        ORDER BY s.firstName, s.userId, a.sessionId";
+    // Build the main query - FIXED VERSION
+    if ($selectedSubject === 'all') {
+        // For "all subjects" - show each student-subject combination as separate rows
+        // This is actually correct behavior - each student should appear once per subject
+        $query = "SELECT DISTINCT
+            s.studentId, 
+            s.firstName, 
+            s.lastName,
+            s.academicYear,
+            ss.subjectCode,
+            sub.subjectName,
+            a1.attendanceStatus as session1_status,
+            a2.attendanceStatus as session2_status,
+            a3.attendanceStatus as session3_status
+            FROM tblstudent s
+            INNER JOIN tblstudentsubject ss ON s.studentId = ss.studentId
+            INNER JOIN tblsubject sub ON ss.subjectCode = sub.subjectCode
+            LEFT JOIN tblattendance a1 ON s.studentId = a1.studentId AND ss.subjectCode = a1.subjectCode 
+                AND DATE(a1.markedAt) = ? AND a1.sessionId = 1
+            LEFT JOIN tblattendance a2 ON s.studentId = a2.studentId AND ss.subjectCode = a2.subjectCode 
+                AND DATE(a2.markedAt) = ? AND a2.sessionId = 2
+            LEFT JOIN tblattendance a3 ON s.studentId = a3.studentId AND ss.subjectCode = a3.subjectCode 
+                AND DATE(a3.markedAt) = ? AND a3.sessionId = 3
+            WHERE s.isActive = 1 AND sub.isActive = 1
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)
+            ORDER BY s.firstName, s.lastName, s.studentId, sub.subjectName";
 
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param("s", $selectedDate);
-    $stmt->execute();
+        $stmt = $conn->prepare($query);
+        if (!$stmt) {
+            die("Prepare failed for main query (all subjects): " . $conn->error);
+        }
+        $stmt->bind_param("sssi", $selectedDate, $selectedDate, $selectedDate, $dayOfWeek);
+
+    } else {
+        // For specific subject - each student appears only once
+        $query = "SELECT DISTINCT
+            s.studentId, 
+            s.firstName, 
+            s.lastName,
+            s.academicYear,
+            ss.subjectCode,
+            sub.subjectName,
+            a1.attendanceStatus as session1_status,
+            a2.attendanceStatus as session2_status,
+            a3.attendanceStatus as session3_status
+            FROM tblstudent s
+            INNER JOIN tblstudentsubject ss ON s.studentId = ss.studentId
+            INNER JOIN tblsubject sub ON ss.subjectCode = sub.subjectCode
+            LEFT JOIN tblattendance a1 ON s.studentId = a1.studentId AND ss.subjectCode = a1.subjectCode 
+                AND DATE(a1.markedAt) = ? AND a1.sessionId = 1
+            LEFT JOIN tblattendance a2 ON s.studentId = a2.studentId AND ss.subjectCode = a2.subjectCode 
+                AND DATE(a2.markedAt) = ? AND a2.sessionId = 2
+            LEFT JOIN tblattendance a3 ON s.studentId = a3.studentId AND ss.subjectCode = a3.subjectCode 
+                AND DATE(a3.markedAt) = ? AND a3.sessionId = 3
+            WHERE s.isActive = 1 AND sub.isActive = 1 AND ss.subjectCode = ?
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)
+            ORDER BY s.firstName, s.lastName, s.studentId";
+
+        $stmt = $conn->prepare($query);
+        if (!$stmt) {
+            die("Prepare failed for main query (specific subject): " . $conn->error);
+        }
+        $stmt->bind_param("ssssi", $selectedDate, $selectedDate, $selectedDate, $selectedSubject, $dayOfWeek);
+    }
+
+    if (!$stmt->execute()) {
+        die("Execute failed for main query: " . $stmt->error);
+    }
+
     $rs = $stmt->get_result();
     $allRows = [];
 
@@ -79,6 +224,12 @@ if ($showAttendance) {
             $allRows[] = $row;
         }
     }
+
+    // Debug: Add this temporarily to see what's being returned
+    echo "<!-- Debug: Found " . count($allRows) . " rows -->";
+    foreach ($allRows as $index => $row) {
+        echo "<!-- Row $index: Student {$row['studentId']}, Subject {$row['subjectCode']} -->";
+    }
 }
 ?>
 
@@ -86,64 +237,124 @@ if ($showAttendance) {
 <html lang="en">
 
 <head>
-    <title>Attendance</title>
+    <title>Attendance V2</title>
     <link rel="stylesheet" href="../style.css" />
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
         rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <!-- <style>
-        .date-filter-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+    <style>
+        /* Enhanced styling for better UX */
+        .attendance-checkbox {
+            transform: scale(1.2);
+            margin: 0 auto;
+            display: block;
         }
 
-        .date-input {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            min-width: 140px;
-        }
-
-        .date-input:focus {
-            outline: none;
-            border-color: #4CAF50;
-            box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
-        }
-
-        .search-and-date-container {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-
-        .date-label {
-            font-weight: 500;
-            color: #333;
-        }
-
-        .weekend-notice {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 15px;
-            border-radius: 5px;
+        .session-cell {
             text-align: center;
-            margin: 20px 0;
+            position: relative;
         }
 
-        @media (max-width: 768px) {
-            .search-and-date-container {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 15px;
+        .loading-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+
+        /* Custom message box styles */
+        .message-box {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            min-width: 300px;
+            display: none;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .message-box.success {
+            background-color: #28a745;
+            border-left: 4px solid #1e7e34;
+        }
+
+        .message-box.error {
+            background-color: #dc3545;
+            border-left: 4px solid #c82333;
+        }
+
+        .message-box .close-btn {
+            float: right;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
             }
         }
-    </style> -->
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+
+        /* Weekend notice styling */
+        .weekend-notice, .schedule-notice {
+            text-align: center;
+            padding: 40px;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            margin: 20px 0;
+            color: #856404;
+        }
+
+        .weekend-notice i, .schedule-notice i {
+            color: #856404;
+        }
+
+        /* Disabled checkbox styling */
+        .attendance-checkbox:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Row highlighting for better readability */
+        .student-row:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .student-row:hover {
+            background-color: #e3f2fd;
+        }
+    </style>
 </head>
 
 <body>
@@ -156,26 +367,71 @@ if ($showAttendance) {
             <div class="breadcrumb"><a href="./">Home /</a> Attendance</div>
         </div>
 
+        <!-- Message box for notifications -->
+        <div id="messageBox" class="message-box">
+            <button class="close-btn" onclick="closeMessage()">&times;</button>
+            <span id="messageText"></span>
+        </div>
+
         <div class="list-container">
             <?php if (!$showAttendance): ?>
-                <div class="weekend-notice">
-                    <i class="fas fa-calendar-times" style="font-size: 24px; margin-bottom: 10px;"></i>
-                    <p><strong>Weekend Notice</strong></p>
-                    <p>Attendance cannot be marked on weekends (<?php echo $selectedDateTime->format('l, F j, Y'); ?>).
-                        Please select a weekday to view attendance records.</p>
-                </div>
+                    <div class="weekend-notice">
+                        <i class="fas fa-calendar-times" style="font-size: 24px; margin-bottom: 10px;"></i>
+                        <p><strong>Weekend Notice</strong></p>
+                        <p>Attendance cannot be marked on weekends (<?php echo $selectedDateTime->format('l, F j, Y'); ?>).
+                            Please select a weekday to view attendance records.</p>
+                    </div>
+            <?php elseif (!$isValidSubjectForDate && $selectedSubject !== 'all'): ?>
+                    <div class="schedule-notice">
+                        <i class="fas fa-calendar-exclamation"
+                            style="font-size: 24px; margin-bottom: 10px; color: #856404;"></i>
+                        <p><strong>Subject Not Scheduled</strong></p>
+                        <p>The selected subject is not scheduled for <?php echo $selectedDateTime->format('l, F j, Y'); ?>.
+                            Please select "All Subjects" or choose a date when this subject is taught.</p>
+                    </div>
             <?php endif; ?>
 
             <div class="searchbar">
                 <div class="header-row">
-                    <h2 class="list-title">Daily Attendance</h2>
+                    <h2 class="list-title">Daily Attendance - <?php echo $selectedDateTime->format('l, F j, Y'); ?></h2>
                     <div class="search-and-date-container">
-                        <div class="date-filter-container">
-                            <label for="dateFilter" class="date-label">
-                                <i class="fas fa-calendar-alt"></i> Date:
-                            </label>
-                            <input type="date" id="dateFilter" class="date-input" value="<?php echo $selectedDate; ?>"
-                                max="<?php echo date('Y-m-d'); ?>">
+                        <div class="filter-container">
+                            <div class="subject-filter-container">
+                                <label for="subjectFilter" class="filter-label">
+                                    <i class="fas fa-book"></i> Subject:
+                                </label>
+                                <select id="subjectFilter" class="filter-select">
+                                    <option value="all" <?php echo ($selectedSubject === 'all') ? 'selected' : ''; ?>>All
+                                        Subjects</option>
+                                    <?php foreach ($availableSubjects as $subject): ?>
+                                            <?php
+                                            // Check if subject is scheduled for selected day
+                                            $isScheduledForDay = true;
+                                            if (isset($subject['scheduledDay']) && !empty($subject['scheduledDay'])) {
+                                                $scheduledDays = explode(',', $subject['scheduledDay']);
+                                                $isScheduledForDay = in_array($dayOfWeek, $scheduledDays);
+                                            }
+
+                                            $optionClass = $isScheduledForDay ? '' : 'not-scheduled';
+                                            $optionTitle = $isScheduledForDay ? '' : 'Not scheduled for ' . $selectedDateTime->format('l');
+                                            ?>
+                                            <option value="<?php echo htmlspecialchars($subject['subjectCode']); ?>"
+                                                class="<?php echo $optionClass; ?>" title="<?php echo $optionTitle; ?>" 
+                                                <?php echo ($selectedSubject == $subject['subjectCode']) ? 'selected' : ''; ?>
+                                                <?php echo !$isScheduledForDay ? 'disabled style="color: #ccc; font-style: italic;"' : ''; ?>>
+                                                <?php echo htmlspecialchars($subject['subjectName']); ?>
+                                                <?php echo !$isScheduledForDay ? ' (Not scheduled)' : ''; ?>
+                                            </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="date-filter-container">
+                                <label for="dateFilter" class="filter-label">
+                                    <i class="fas fa-calendar-alt"></i> Date:
+                                </label>
+                                <input type="date" id="dateFilter" class="filter-input"
+                                    value="<?php echo $selectedDate; ?>" max="<?php echo date('Y-m-d'); ?>">
+                            </div>
                         </div>
                         <div class="search-container">
                             <input type="text" id="studentSearch" class="search-input"
@@ -187,130 +443,146 @@ if ($showAttendance) {
                     </div>
                 </div>
 
-                <?php if ($showAttendance): ?>
-                    <div class="table-wrapper">
-                        <table class="student-table" id="attendanceTable">
-                            <thead>
-                                <tr>
-                                    <th>Student ID</th>
-                                    <th>Name</th>
-                                    <th>Academic Year</th>
-                                    <th colspan="3" style="text-align:center;">Attendance</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php
-                                if (!empty($allRows)) {
-                                    $studentSessions = [];
-
-                                    // Process all rows
-                                    foreach ($allRows as $row) {
-                                        if (!$row || !isset($row['studentId']) || empty($row['studentId'])) {
-                                            continue;
-                                        }
-
-                                        $studentId = $row['studentId'];
-                                        $firstName = isset($row['firstName']) ? $row['firstName'] : 'Unknown';
-                                        $lastName = isset($row['lastName']) ? $row['lastName'] : '';
-                                        $academicYear = isset($row['academicYear']) ? $row['academicYear'] : 'N/A';
-
-                                        $studentSessions[$studentId]['name'] = trim($firstName . ' ' . $lastName);
-                                        $studentSessions[$studentId]['academicYear'] = $academicYear;
-
-                                        // Initialize all sessions as present if not set
-                                        if (!isset($studentSessions[$studentId]['sessions'])) {
-                                            $studentSessions[$studentId]['sessions'] = [
-                                                1 => 'present',
-                                                2 => 'present',
-                                                3 => 'present'
-                                            ];
-                                        }
-
-                                        // Update with actual attendance if exists
-                                        $sessionId = isset($row['sessionId']) ? $row['sessionId'] : null;
-                                        $attendanceStatus = isset($row['attendanceStatus']) ? $row['attendanceStatus'] : null;
-
-                                        if ($sessionId && $attendanceStatus) {
-                                            $studentSessions[$studentId]['sessions'][$sessionId] = $attendanceStatus;
-                                        }
-                                    }
-
-                                    // Display the data
-                                    if (empty($studentSessions)) {
-                                        echo "<tr class='no-data'><td colspan='6' style='text-align:center; padding:20px; color:#666;'>
-                                        No student data available for " . date('F j, Y', strtotime($selectedDate)) . ".
-                                    </td></tr>";
-                                    } else {
-                                        foreach ($studentSessions as $studentId => $data) {
-                                            echo "<tr class='student-row' data-student-id='" . htmlspecialchars($studentId) . "' data-student-name='" . htmlspecialchars(strtolower($data['name'])) . "'>
-                                            <td>" . htmlspecialchars($studentId) . "</td>
-                                            <td>" . htmlspecialchars($data['name']) . "</td>
-                                            <td>" . htmlspecialchars($data['academicYear']) . "</td>";
-
-                                            for ($i = 1; $i <= 3; $i++) {
-                                                $status = isset($data['sessions'][$i]) ? $data['sessions'][$i] : 'present';
-                                                $isAbsent = ($status === 'absent') ? 'checked' : '';
-                                                $isEditable = ($selectedDate === date('Y-m-d')) ? '' : 'disabled';
-                                                echo "<td style='text-align:center;'>
-                                                <input type='checkbox' 
-                                                       class='absence-checkbox' 
-                                                       data-student='" . htmlspecialchars($studentId) . "' 
-                                                       data-session='{$i}' 
-                                                       {$isAbsent} {$isEditable}>
-                                            </td>";
+                <?php if ($showAttendance && $isValidSubjectForDate): ?>
+                        <div class="table-wrapper">
+                            <table class="student-table" id="attendanceTable">
+                                <thead>
+                                    <tr>
+                                        <th>Student ID</th>
+                                        <th>Name</th>
+                                        <th>Academic Year</th>
+                                        <th>Subject</th>
+                                        <th>Session 1</th>
+                                        <th>Session 2</th>
+                                        <th>Session 3</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php
+                                    if (!empty($allRows)) {
+                                        foreach ($allRows as $row) {
+                                            if (!$row || !isset($row['studentId']) || empty($row['studentId'])) {
+                                                continue;
                                             }
+
+                                            $studentId = htmlspecialchars($row['studentId']);
+                                            $firstName = htmlspecialchars($row['firstName'] ?? 'Unknown');
+                                            $lastName = htmlspecialchars($row['lastName'] ?? '');
+                                            $fullName = trim($firstName . ' ' . $lastName);
+                                            $academicYear = htmlspecialchars($row['academicYear'] ?? 'N/A');
+                                            $subjectName = htmlspecialchars($row['subjectName'] ?? 'N/A');
+                                            $subjectCode = htmlspecialchars($row['subjectCode'] ?? '');
+
+                                            // Get attendance status for each session (default to 'present' if null)
+                                            $session1Status = $row['session1_status'] ?? 'present';
+                                            $session2Status = $row['session2_status'] ?? 'present';
+                                            $session3Status = $row['session3_status'] ?? 'present';
+
+                                            $isEditable = ($selectedDate === date('Y-m-d')) ? '' : 'disabled';
+
+                                            echo "<tr class='student-row' data-student-id='{$studentId}' data-student-name='" . strtolower($fullName) . "'>
+                                            <td>{$studentId}</td>
+                                            <td>{$fullName}</td>
+                                            <td>{$academicYear}</td>
+                                            <td>{$subjectName}</td>";
+
+                                            // Session 1
+                                            $session1Checked = ($session1Status === 'absent') ? 'checked' : '';
+                                            echo "<td class='session-cell'>
+                                                <input type='checkbox' 
+                                                       class='attendance-checkbox' 
+                                                       data-student-id='{$studentId}' 
+                                                       data-subject-code='{$subjectCode}'
+                                                       data-session='1' 
+                                                       {$session1Checked} {$isEditable}
+                                                       title='Mark as absent'>
+                                                <div class='loading-indicator'>
+                                                    <i class='fas fa-spinner fa-spin'></i>
+                                                </div>
+                                            </td>";
+
+                                            // Session 2
+                                            $session2Checked = ($session2Status === 'absent') ? 'checked' : '';
+                                            echo "<td class='session-cell'>
+                                                <input type='checkbox' 
+                                                       class='attendance-checkbox' 
+                                                       data-student-id='{$studentId}' 
+                                                       data-subject-code='{$subjectCode}'
+                                                       data-session='2' 
+                                                       {$session2Checked} {$isEditable}
+                                                       title='Mark as absent'>
+                                                <div class='loading-indicator'>
+                                                    <i class='fas fa-spinner fa-spin'></i>
+                                                </div>
+                                            </td>";
+
+                                            // Session 3
+                                            $session3Checked = ($session3Status === 'absent') ? 'checked' : '';
+                                            echo "<td class='session-cell'>
+                                                <input type='checkbox' 
+                                                       class='attendance-checkbox' 
+                                                       data-student-id='{$studentId}' 
+                                                       data-subject-code='{$subjectCode}'
+                                                       data-session='3' 
+                                                       {$session3Checked} {$isEditable}
+                                                       title='Mark as absent'>
+                                                <div class='loading-indicator'>
+                                                    <i class='fas fa-spinner fa-spin'></i>
+                                                </div>
+                                            </td>";
+
                                             echo "</tr>";
                                         }
-                                    }
-                                } else {
-                                    echo "<tr class='no-data'><td colspan='6' style='text-align:center; padding:20px; color:#666;'>
-                                    No data available for " . date('F j, Y', strtotime($selectedDate)) . ".
+                                    } else {
+                                        echo "<tr class='no-data'><td colspan='7' style='text-align:center; padding:20px; color:#666;'>
+                                    No students found for the selected criteria on " . date('F j, Y', strtotime($selectedDate)) . ".
                                 </td></tr>";
-                                }
-                                ?>
-                            </tbody>
-                        </table>
+                                    }
+                                    ?>
+                                </tbody>
+                            </table>
 
-                        <div id="noResults" class="no-results" style="display: none;">
-                            <i class="fas fa-search" style="font-size: 24px; margin-bottom: 10px; opacity: 0.5;"></i>
-                            <p>No students found matching your search.</p>
-                        </div>
+                            <div id="noResults" class="no-results" style="display: none;">
+                                <i class="fas fa-search" style="font-size: 24px; margin-bottom: 10px; opacity: 0.5;"></i>
+                                <p>No students found matching your search.</p>
+                            </div>
 
-                        <!-- Pagination moved to bottom -->
-                        <div class="table-pagination">
-                            <div class="pagination-info">
-                                <div class="show-entries">
-                                    <label>Show
-                                        <select id="entriesPerPage" class="entries-select">
-                                            <option value="5">5</option>
-                                            <option value="10" selected>10</option>
-                                            <option value="25">25</option>
-                                            <option value="50">50</option>
-                                            <option value="100">100</option>
-                                        </select>
-                                        entries
-                                    </label>
+                            <!-- Pagination -->
+                            <div class="table-pagination">
+                                <div class="pagination-info">
+                                    <div class="show-entries">
+                                        <label>Show
+                                            <select id="entriesPerPage" class="entries-select">
+                                                <option value="5">5</option>
+                                                <option value="10" selected>10</option>
+                                                <option value="25">25</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                            entries
+                                        </label>
+                                    </div>
+                                    <div class="results-count">
+                                        <span id="resultsCount">Showing 0 results</span>
+                                    </div>
                                 </div>
-                                <div class="results-count">
-                                    <span id="resultsCount">Showing 0 results</span>
+                                <div class="pagination-controls">
+                                    <button class="pagination-btn" id="prevBtn" disabled>
+                                        <i class="fas fa-chevron-left"></i>
+                                    </button>
+                                    <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                                    <button class="pagination-btn" id="nextBtn" disabled>
+                                        <i class="fas fa-chevron-right"></i>
+                                    </button>
                                 </div>
                             </div>
-                            <div class="pagination-controls">
-                                <button class="pagination-btn" id="prevBtn" disabled>
-                                    <i class="fas fa-chevron-left"></i>
-                                </button>
-                                <span class="page-info" id="pageInfo">Page 1 of 1</span>
-                                <button class="pagination-btn" id="nextBtn" disabled>
-                                    <i class="fas fa-chevron-right"></i>
-                                </button>
-                            </div>
                         </div>
-                    </div>
                 <?php endif; ?>
             </div>
         </div>
     </div>
 
+    <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal" style="display:none;">
         <div class="modal-box">
             <h2 style="margin-bottom: 12px">Confirm</h2>
@@ -323,7 +595,44 @@ if ($showAttendance) {
     </div>
 
     <script>
-        // Logout modal handlers
+        // Message box functions
+        function showMessage(message, type = 'success') {
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+
+            messageText.textContent = message;
+            messageBox.className = 'message-box ' + type;
+            messageBox.style.display = 'block';
+
+            // Auto hide after 4 seconds
+            setTimeout(() => {
+                closeMessage();
+            }, 4000);
+        }
+
+        function closeMessage() {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.style.animation = 'slideOut 0.3s ease-out';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+                messageBox.style.animation = 'slideIn 0.3s ease-out';
+            }, 300);
+        }
+
+        // Filter change handlers
+        document.getElementById('dateFilter').addEventListener('change', function () {
+            const selectedDate = this.value;
+            const selectedSubject = document.getElementById('subjectFilter').value;
+            window.location.href = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
+        });
+
+        document.getElementById('subjectFilter').addEventListener('change', function () {
+            const selectedSubject = this.value;
+            const selectedDate = document.getElementById('dateFilter').value;
+            window.location.href = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
+        });
+
+        // Logout handlers
         document.querySelectorAll('.logout-link').forEach(function (link) {
             link.addEventListener('click', function (e) {
                 e.preventDefault();
@@ -339,306 +648,213 @@ if ($showAttendance) {
         };
 
         $(document).ready(function () {
-            // Date filter handler
-            $('#dateFilter').change(function () {
-                const selectedDate = $(this).val();
-                if (selectedDate) {
-                    // Add loading indicator
-                    $('body').append('<div id="loadingOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;"><div style="background:white;padding:20px;border-radius:8px;text-align:center;"><i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i><br>Loading attendance data...</div></div>');
-
-                    // Navigate to the same page with the selected date
-                    window.location.href = window.location.pathname + '?date=' + selectedDate;
-                }
-            });
-
-            // Pagination variables
+            // --- Pagination Variables ---
+            let rowsPerPage = parseInt($('#entriesPerPage').val()) || 10;
             let currentPage = 1;
-            let rowsPerPage = 10;
-            let totalRows = 0;
+            let allRows = [];
             let filteredRows = [];
 
-            // Function to show styled message box
-            function showMessage(message, type = 'success', duration = 3000) {
-                $('.attendance-message').remove();
-
-                const messageBox = $(`
-                    <div class="attendance-message ${type}" style="
-                        position: fixed;
-                        top: 20px;
-                        right: 20px;
-                        padding: 15px 20px;
-                        border-radius: 8px;
-                        color: white;
-                        font-weight: 500;
-                        z-index: 10000;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                        max-width: 400px;
-                        animation: slideInRight 0.3s ease;
-                        ${type === 'success' ? 'background: linear-gradient(135deg, #4CAF50, #45a049);' : ''}
-                        ${type === 'error' ? 'background: linear-gradient(135deg, #f44336, #d32f2f);' : ''}
-                        ${type === 'info' ? 'background: linear-gradient(135deg, #2196F3, #1976D2);' : ''}
-                    ">
-                        <div style="display: flex; align-items: center; justify-content: space-between;">
-                            <span class="message-text" style="flex: 1; margin-right: 10px;">${message}</span>
-                            <button class="message-close" style="
-                                background: none;
-                                border: none;
-                                color: white;
-                                font-size: 18px;
-                                cursor: pointer;
-                                padding: 0;
-                                line-height: 1;
-                            ">&times;</button>
-                        </div>
-                    </div>
-                `);
-
-                if (!$('#messageAnimations').length) {
-                    $('head').append(`
-                        <style id="messageAnimations">
-                            @keyframes slideInRight {
-                                from { transform: translateX(100%); opacity: 0; }
-                                to { transform: translateX(0); opacity: 1; }
-                            }
-                            @keyframes slideOutRight {
-                                from { transform: translateX(0); opacity: 1; }
-                                to { transform: translateX(100%); opacity: 0; }
-                            }
-                        </style>
-                    `);
-                }
-
-                $('body').append(messageBox);
-
-                if (duration > 0) {
-                    setTimeout(() => {
-                        messageBox.css('animation', 'slideOutRight 0.3s ease');
-                        setTimeout(() => messageBox.remove(), 300);
-                    }, duration);
-                }
-
-                messageBox.find('.message-close').click(function () {
-                    messageBox.css('animation', 'slideOutRight 0.3s ease');
-                    setTimeout(() => messageBox.remove(), 300);
-                });
-
-                return messageBox;
+            // Initialize rows array
+            function initializeRows() {
+                allRows = $('#attendanceTable tbody tr.student-row').toArray();
+                filteredRows = allRows.slice(); // Copy all rows initially
             }
 
-            // Search functionality
-            function filterTable() {
-                const searchTerm = $('#studentSearch').val().toLowerCase().trim();
-                const allRows = $('.student-row');
+            function paginateTable() {
+                // Hide all rows first
+                $('#attendanceTable tbody tr.student-row').hide();
+                $('#attendanceTable tbody tr.no-data').hide();
 
-                if (searchTerm === '') {
-                    filteredRows = allRows;
-                    $('#noResults').hide();
+                let totalRows = filteredRows.length;
+                let totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+
+                // Ensure currentPage is within valid range
+                if (currentPage > totalPages) {
+                    currentPage = totalPages;
+                }
+                if (currentPage < 1) {
+                    currentPage = 1;
+                }
+
+                if (totalRows === 0) {
+                    // Show no results message
+                    $('#noResults').show();
+                    $('#resultsCount').text('Showing 0 results');
+                    $('#pageInfo').text('Page 0 of 0');
                 } else {
-                    filteredRows = allRows.filter(function () {
-                        const studentId = $(this).data('student-id').toString().toLowerCase();
-                        const studentName = $(this).data('student-name');
-                        return studentId.includes(searchTerm) || studentName.includes(searchTerm);
-                    });
+                    // Hide no results message
+                    $('#noResults').hide();
 
-                    if (filteredRows.length === 0) {
-                        $('#noResults').show();
-                    } else {
-                        $('#noResults').hide();
-                    }
-                }
+                    // Calculate range
+                    let startIndex = (currentPage - 1) * rowsPerPage;
+                    let endIndex = Math.min(startIndex + rowsPerPage, totalRows);
 
-                currentPage = 1;
-                updatePagination();
-            }
-
-            // Search input handler
-            $('#studentSearch').on('input', function () {
-                filterTable();
-            });
-
-            // Clear search button
-            $('#clearSearch').click(function () {
-                $('#studentSearch').val('');
-                filterTable();
-            });
-
-            // Function to retry failed requests
-            function retryAttendanceUpdate(checkbox, studentId, sessionId, status, studentName, retryCount = 0) {
-                const maxRetries = 2;
-
-                if (retryCount > 0) {
-                    showMessage(`Retrying... Attempt ${retryCount + 1}/${maxRetries + 1}`, 'info', 2000);
-                }
-
-                $.ajax({
-                    url: 'saveAttendance.php',
-                    method: 'POST',
-                    timeout: 10000,
-                    data: {
-                        studentId: studentId,
-                        sessionId: sessionId,
-                        status: status,
-                        date: $('#dateFilter').val() || new Date().toISOString().slice(0, 10)
-                    },
-                    success: function (response) {
-                        checkbox.prop('disabled', false);
-
-                        let parsedResponse;
-                        try {
-                            parsedResponse = typeof response === 'string' ? JSON.parse(response) : response;
-                        } catch (e) {
-                            console.error('Invalid JSON response:', response);
-                            parsedResponse = { success: false, message: 'Invalid server response' };
-                        }
-
-                        if (parsedResponse.success) {
-                            const statusText = status === 'absent' ? 'ABSENT' : 'PRESENT';
-                            showMessage(`${studentName} marked as ${statusText} for Session ${sessionId}`, 'success');
-                            console.log(`Database updated: ${studentName} (${studentId}), Session ${sessionId}: ${status}`);
-                        } else {
-                            checkbox.prop('checked', !checkbox.is(':checked'));
-                            showMessage(`Error: ${parsedResponse.message}`, 'error');
-                            console.error('Server error:', parsedResponse.message);
-                        }
-                    },
-                    error: function (xhr, status, error) {
-                        console.error('AJAX Error Details:', {
-                            status: status,
-                            error: error,
-                            responseText: xhr.responseText,
-                            readyState: xhr.readyState,
-                            statusCode: xhr.status
-                        });
-
-                        if (retryCount < maxRetries && (
-                            status === 'timeout' ||
-                            xhr.status === 0 ||
-                            xhr.status >= 500
-                        )) {
-                            setTimeout(() => {
-                                retryAttendanceUpdate(checkbox, studentId, sessionId, status, studentName, retryCount + 1);
-                            }, 1000 * (retryCount + 1));
-                        } else {
-                            checkbox.prop('disabled', false);
-                            checkbox.prop('checked', !checkbox.is(':checked'));
-
-                            let errorMessage = `Failed to update attendance for ${studentName}.`;
-
-                            if (status === 'timeout') {
-                                errorMessage += ' Request timed out. Check your connection.';
-                            } else if (xhr.status === 0) {
-                                errorMessage += ' Network error. Check your internet connection.';
-                            } else if (xhr.status === 404) {
-                                errorMessage += ' Save file not found. Contact administrator.';
-                            } else if (xhr.status >= 500) {
-                                errorMessage += ' Server error. Try again later.';
-                            } else if (xhr.responseText) {
-                                try {
-                                    const errorResponse = JSON.parse(xhr.responseText);
-                                    if (errorResponse.message) {
-                                        errorMessage += ' ' + errorResponse.message;
-                                    }
-                                } catch (e) {
-                                    errorMessage += ' Please try again.';
-                                }
-                            }
-
-                            showMessage(errorMessage, 'error', 5000);
+                    // Show rows for current page
+                    for (let i = startIndex; i < endIndex; i++) {
+                        if (filteredRows[i]) {
+                            $(filteredRows[i]).show();
                         }
                     }
-                });
-            }
 
-            // Pagination functions
-            function updatePagination() {
-                const rows = filteredRows.length > 0 ? filteredRows : $('.student-row:not(.no-data)');
-                totalRows = rows.length;
-                const totalPages = Math.ceil(totalRows / rowsPerPage);
-
-                // Update results count
-                const startIndex = (currentPage - 1) * rowsPerPage + 1;
-                const endIndex = Math.min(currentPage * rowsPerPage, totalRows);
-                $('#resultsCount').text(`Showing ${totalRows > 0 ? startIndex + '-' + endIndex : '0'} of ${totalRows} results`);
-
-                // Update page info
-                $('#pageInfo').text(`Page ${currentPage} of ${Math.max(1, totalPages)}`);
-
-                // Show/hide rows
-                $('.student-row').hide();
-                if (rows.length > 0) {
-                    rows.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).show();
+                    // Update pagination info
+                    let showingFrom = totalRows > 0 ? startIndex + 1 : 0;
+                    let showingTo = endIndex;
+                    $('#resultsCount').text(`Showing ${showingFrom} to ${showingTo} of ${totalRows} results`);
+                    $('#pageInfo').text(`Page ${currentPage} of ${totalPages}`);
                 }
 
-                // Update pagination buttons
+                // Update button states
                 $('#prevBtn').prop('disabled', currentPage <= 1);
-                $('#nextBtn').prop('disabled', currentPage >= totalPages);
+                $('#nextBtn').prop('disabled', currentPage >= totalPages || totalRows === 0);
             }
 
-            // Entries per page change handler
+            // --- Event Handlers ---
             $('#entriesPerPage').change(function () {
-                rowsPerPage = parseInt($(this).val());
-                currentPage = 1;
-                updatePagination();
+                let newRowsPerPage = parseInt($(this).val());
+                if (newRowsPerPage && newRowsPerPage > 0) {
+                    rowsPerPage = newRowsPerPage;
+                    currentPage = 1;
+                    paginateTable();
+                }
             });
 
-            // Pagination button handlers
             $('#prevBtn').click(function () {
                 if (currentPage > 1) {
                     currentPage--;
-                    updatePagination();
+                    paginateTable();
                 }
             });
 
             $('#nextBtn').click(function () {
-                const totalPages = Math.ceil(totalRows / rowsPerPage);
+                let totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
                 if (currentPage < totalPages) {
                     currentPage++;
-                    updatePagination();
+                    paginateTable();
                 }
             });
 
-            // Initialize
-            filteredRows = $('.student-row');
-            setTimeout(updatePagination, 100);
+            // --- Search Functionality ---
+            $('#studentSearch').on('input', function () {
+                let searchVal = $(this).val().toLowerCase().trim();
 
-            // Main checkbox handler
-            $('.absence-checkbox').change(function () {
-                var checkbox = $(this);
-
-                // Check if checkbox is disabled (for past dates)
-                if (checkbox.prop('disabled')) {
-                    showMessage('Cannot modify attendance for past dates.', 'error');
-                    return;
-                }
-
-                var studentId = checkbox.data('student');
-                var sessionId = checkbox.data('session');
-                var isAbsent = checkbox.is(':checked');
-                var status = isAbsent ? 'absent' : 'present';
-
-                var studentName = checkbox.closest('tr').find('td:nth-child(2)').text().trim();
-
-                if (!studentId || !sessionId || !studentName) {
-                    showMessage('Invalid data. Please refresh the page and try again.', 'error');
-                    checkbox.prop('checked', !checkbox.is(':checked'));
-                    return;
-                }
-
-                checkbox.prop('disabled', true);
-                showMessage(`Updating attendance for ${studentName}...`, 'info', 0);
-                retryAttendanceUpdate(checkbox, studentId, sessionId, status, studentName);
-            });
-
-            $(document).ajaxError(function (event, xhr, settings, thrownError) {
-                if (settings.url && settings.url.includes('saveAttendance.php')) {
-                    console.error('Global AJAX error handler caught:', {
-                        url: settings.url,
-                        status: xhr.status,
-                        error: thrownError,
-                        response: xhr.responseText
+                if (searchVal === '') {
+                    // Show all rows
+                    filteredRows = allRows.slice();
+                } else {
+                    // Filter rows based on search
+                    filteredRows = allRows.filter(function (row) {
+                        let $row = $(row);
+                        let studentId = ($row.data('student-id') || '').toString().toLowerCase();
+                        let studentName = ($row.data('student-name') || '').toString().toLowerCase();
+                        return studentId.includes(searchVal) || studentName.includes(searchVal);
                     });
                 }
+
+                currentPage = 1;
+                paginateTable();
             });
+
+            $('#clearSearch').click(function () {
+                $('#studentSearch').val('').trigger('input');
+            });
+
+            // --- Enhanced Attendance Update (AJAX) ---
+            $(document).on('change', '.attendance-checkbox', function () {
+                let $checkbox = $(this);
+                let $loadingIndicator = $checkbox.siblings('.loading-indicator');
+
+                // Get data attributes
+                let studentId = $checkbox.data('student-id');
+                let subjectCode = $checkbox.data('subject-code');
+                let sessionId = $checkbox.data('session');
+                let isAbsent = $checkbox.is(':checked') ? 1 : 0;
+                let date = $('#dateFilter').val();
+
+                // Validation
+                if (!studentId || !subjectCode || !sessionId) {
+                    showMessage('Missing required data. Please refresh the page and try again.', 'error');
+                    $checkbox.prop('checked', !$checkbox.prop('checked')); // Revert
+                    return;
+                }
+
+                // Show loading indicator
+                $checkbox.prop('disabled', true);
+                $loadingIndicator.show();
+
+                // Prepare data for AJAX
+                let ajaxData = {
+                    studentId: studentId,
+                    subjectCode: subjectCode,
+                    sessionId: sessionId,
+                    isAbsent: isAbsent,
+                    date: date,
+                    action: 'update_attendance'
+                };
+
+                $.ajax({
+                    url: 'update_attendance.php',
+                    type: 'POST',
+                    data: ajaxData,
+                    dataType: 'json',
+                    timeout: 10000, // 10 second timeout
+                    success: function (response) {
+                        if (response && response.success) {
+                            // Show success message
+                            let statusText = isAbsent ? 'marked as absent' : 'marked as present';
+                            let studentName = $checkbox.closest('tr').find('td:nth-child(2)').text();
+                            showMessage(`${studentName} - Session ${sessionId} ${statusText}`, 'success');
+                        } else {
+                            // Server returned error
+                            let errorMsg = response && response.error ? response.error : 'Unknown server error';
+                            showMessage('Failed to update attendance: ' + errorMsg, 'error');
+                            $checkbox.prop('checked', !$checkbox.prop('checked')); // Revert
+                        }
+                    },
+                    error: function (xhr, status, error) {
+                        let errorMsg = 'Failed to update attendance. ';
+                        if (status === 'timeout') {
+                            errorMsg += 'Request timed out.';
+                        } else if (status === 'parsererror') {
+                            errorMsg += 'Invalid server response.';
+                        } else if (xhr.status === 404) {
+                            errorMsg += 'Update script not found.';
+                        } else if (xhr.status === 500) {
+                            errorMsg += 'Server error.';
+                        } else {
+                            errorMsg += 'Please try again.';
+                        }
+
+                        showMessage(errorMsg, 'error');
+                        $checkbox.prop('checked', !$checkbox.prop('checked')); // Revert
+                    },
+                    complete: function () {
+                        // Always hide loading and re-enable checkbox
+                        $loadingIndicator.hide();
+                        $checkbox.prop('disabled', false);
+                    }
+                });
+            });
+
+            // --- Initialize ---
+            initializeRows();
+            paginateTable();
+
+            // Re-initialize if table content changes (e.g., after AJAX updates)
+            if (window.MutationObserver) {
+                let observer = new MutationObserver(function (mutations) {
+                    mutations.forEach(function (mutation) {
+                        if (mutation.type === 'childList') {
+                            initializeRows();
+                            paginateTable();
+                        }
+                    });
+                });
+
+                let tableBody = document.querySelector('#attendanceTable tbody');
+                if (tableBody) {
+                    observer.observe(tableBody, { childList: true });
+                }
+            }
         });
     </script>
 </body>

@@ -1039,6 +1039,48 @@ header .user-role {
     margin: 20px 0;
 }
 
+.filter-container {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.subject-filter-container,
+.date-filter-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-label {
+    font-weight: 500;
+    color: #333;
+    font-size: 14px;
+}
+
+.filter-select,
+.filter-input {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.schedule-notice {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    text-align: center;
+}
+
+.not-scheduled {
+    color: #ccc !important;
+    font-style: italic;
+}
+
 @media (max-width: 768px) {
     .search-and-date-container {
         flex-direction: column;

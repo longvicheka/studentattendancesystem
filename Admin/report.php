@@ -1,10 +1,19 @@
 <?php
+session_start();
 include '../Includes/db.php';
-include '../Includes/session.php';
 
 // Check database connection
 if (!$conn) {
     die("Connection failed: " . mysqli_connect_error());
+}
+
+// Cache configuration
+$cacheDir = '../cache/reports/';
+$cacheFile = $cacheDir . 'attendance_cache.json';
+
+// Ensure cache directory exists
+if (!file_exists($cacheDir)) {
+    mkdir($cacheDir, 0755, true);
 }
 
 // Get students for dropdown
@@ -15,36 +24,92 @@ if (!$studentsResult) {
     echo "Error in students query: " . $conn->error;
 }
 
-// Handle report generation
-$reportData = [];
-$reportGenerated = false;
+// Function to get database hash for change detection
+function getDatabaseHash($conn, $studentId = 'all', $startDate = '', $endDate = '')
+{
+    // Use the same query logic as fetchDatabaseData to ensure consistency
+    $query = "SELECT COUNT(*) as total_records, 
+                     MAX(a.markedAt) as last_modified,
+                     GROUP_CONCAT(CONCAT(COALESCE(a.studentId, s.studentId), '_', COALESCE(a.sessionId, 'null'), '_', COALESCE(DATE(a.markedAt), 'null'), '_', COALESCE(a.attendanceStatus, 'null')) ORDER BY s.studentId, a.markedAt, a.sessionId SEPARATOR '|') as data_signature
+              FROM tblstudent s 
+              LEFT JOIN tblattendance a ON s.studentId = a.studentId";
 
-if (isset($_POST['generate_report'])) {
-    $studentId = $_POST['table_id'] ?? 'all';
-    $startDate = $_POST['start_date'] ?? '';
-    $endDate = $_POST['end_date'] ?? '';
+    $conditions = [];
+    $params = [];
 
-    // FIXED: Modified LEFT JOIN to ensure all students appear
-    $query = "SELECT DISTINCT
+    if ($studentId !== 'all') {
+        $conditions[] = "s.studentId = ?";
+        $params[] = $studentId;
+    }
+
+    if (!empty($startDate)) {
+        $conditions[] = "(a.markedAt IS NULL OR DATE(a.markedAt) >= ?)";
+        $params[] = $startDate;
+    }
+
+    if (!empty($endDate)) {
+        $conditions[] = "(a.markedAt IS NULL OR DATE(a.markedAt) <= ?)";
+        $params[] = $endDate;
+    }
+
+    if (!empty($conditions)) {
+        $query .= " WHERE " . implode(" AND ", $conditions);
+    }
+
+    $stmt = $conn->prepare($query);
+    if ($stmt === false) {
+        echo "<!-- ERROR: Hash query prepare failed: " . $conn->error . " -->";
+        return false;
+    }
+
+    if (!empty($params)) {
+        $stmt->bind_param(str_repeat('s', count($params)), ...$params);
+    }
+
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+
+    $hashData = ($row['data_signature'] ?? '') . ($row['total_records'] ?? '0') . ($row['last_modified'] ?? '');
+    echo "<!-- DEBUG: Hash data: " . substr($hashData, 0, 200) . "... -->";
+
+    return md5($hashData);
+}
+
+// Function to fetch fresh data from database
+function fetchDatabaseData($conn, $studentId = 'all', $startDate = '', $endDate = '')
+{
+    // DEBUGGING: First, let's get all students to ensure they exist
+    $debugQuery = "SELECT Id, studentId, firstName, lastName FROM tblstudent ORDER BY firstName, lastName";
+    $debugResult = $conn->query($debugQuery);
+    $allStudentsDebug = [];
+    if ($debugResult) {
+        while ($row = $debugResult->fetch_assoc()) {
+            $allStudentsDebug[] = $row;
+        }
+    }
+    echo "<!-- DEBUG: All students in database: " . json_encode($allStudentsDebug) . " -->";
+
+    $query = "SELECT 
                 s.Id as table_id,
-                s.userId,
+                s.studentId,
                 s.firstName,
                 s.lastName,
                 a.sessionId,
                 a.markedAt,
                 a.attendanceStatus
               FROM tblstudent s
-              LEFT JOIN tblattendance a ON s.userId = a.studentId";
+              LEFT JOIN tblattendance a ON s.studentId = a.studentId";
 
     $conditions = [];
     $params = [];
 
     if ($studentId !== 'all') {
-        $conditions[] = "s.Id = ?";
+        $conditions[] = "s.studentId = ?";
         $params[] = $studentId;
     }
 
-    // FIXED: Modified date conditions to not exclude students without attendance
+    // FIXED: Modified date conditions to not filter out students without attendance
     if (!empty($startDate)) {
         $conditions[] = "(a.markedAt IS NULL OR DATE(a.markedAt) >= ?)";
         $params[] = $startDate;
@@ -61,120 +126,222 @@ if (isset($_POST['generate_report'])) {
 
     $query .= " ORDER BY s.firstName, s.lastName, a.markedAt, a.sessionId";
 
-    // Debug output
-    echo "<!-- Debug Query: " . $query . " -->";
-    if (!empty($params)) {
-        echo "<!-- Debug Parameters: " . implode(', ', $params) . " -->";
-    }
+    echo "<!-- DEBUG: Final query: " . $query . " -->";
+    echo "<!-- DEBUG: Query parameters: " . json_encode($params) . " -->";
 
     $stmt = $conn->prepare($query);
     if ($stmt === false) {
-        die("Prepare failed: " . $conn->error);
+        echo "<!-- ERROR: Prepare failed: " . $conn->error . " -->";
+        return false;
     }
 
     if (!empty($params)) {
         $stmt->bind_param(str_repeat('s', count($params)), ...$params);
     }
+
     $stmt->execute();
     $result = $stmt->get_result();
 
-    // FIXED: Improved deduplication logic
     $reportData = [];
-    $seenStudents = []; // Track students we've seen
-    
+    $seenStudents = [];
+    $rowCount = 0;
+
+    echo "<!-- DEBUG: Starting to process query results -->";
+
     while ($row = $result->fetch_assoc()) {
-        $studentKey = $row['userId'];
-        
-        // Always include the student record (even with null attendance)
+        $rowCount++;
+        $studentKey = $row['studentId'];
+
+        echo "<!-- DEBUG Row $rowCount: " . json_encode($row) . " -->";
+
+        // Track all students we encounter
         if (!isset($seenStudents[$studentKey])) {
             $seenStudents[$studentKey] = [
                 'table_id' => $row['table_id'],
-                'userId' => $row['userId'],
+                'studentId' => $row['studentId'],
                 'firstName' => $row['firstName'],
                 'lastName' => $row['lastName']
             ];
+            echo "<!-- DEBUG: Added student to seenStudents: " . $studentKey . " -->";
         }
-        
-        // For attendance records, use more robust deduplication
+
+        // Process attendance records
         if ($row['markedAt'] !== null && $row['sessionId'] !== null) {
-            $attendanceKey = $row['userId'] . '_' . date('Y-m-d', strtotime($row['markedAt'])) . '_' . $row['sessionId'];
-            
-            // Check if we already have this attendance record
+            $attendanceKey = $row['studentId'] . '_' . date('Y-m-d', strtotime($row['markedAt'])) . '_' . $row['sessionId'];
+
             $isDuplicate = false;
             foreach ($reportData as $existingRow) {
-                if ($existingRow['userId'] == $row['userId'] && 
+                if (
+                    $existingRow['studentId'] == $row['studentId'] &&
                     $existingRow['markedAt'] !== null &&
                     date('Y-m-d', strtotime($existingRow['markedAt'])) == date('Y-m-d', strtotime($row['markedAt'])) &&
-                    $existingRow['sessionId'] == $row['sessionId']) {
+                    $existingRow['sessionId'] == $row['sessionId']
+                ) {
                     $isDuplicate = true;
                     break;
                 }
             }
-            
+
             if (!$isDuplicate) {
                 $reportData[] = $row;
+                echo "<!-- DEBUG: Added attendance record for studentId: " . $row['studentId'] . " -->";
+            } else {
+                echo "<!-- DEBUG: Skipped duplicate record for studentId: " . $row['studentId'] . " -->";
             }
         } else {
-            // For null attendance records, only add one per student
+            // Handle students with no attendance records
             $hasNullRecord = false;
             foreach ($reportData as $existingRow) {
-                if ($existingRow['userId'] == $row['userId'] && $existingRow['markedAt'] === null) {
+                if ($existingRow['studentId'] == $row['studentId'] && $existingRow['markedAt'] === null) {
                     $hasNullRecord = true;
                     break;
                 }
             }
-            
+
             if (!$hasNullRecord) {
                 $reportData[] = $row;
+                echo "<!-- DEBUG: Added null record for studentId: " . $row['studentId'] . " -->";
             }
         }
     }
-    
-    // FIXED: Ensure all students appear, even those with no attendance records
+
+    echo "<!-- DEBUG: Total rows from query: $rowCount -->";
+    echo "<!-- DEBUG: Students seen: " . json_encode(array_keys($seenStudents)) . " -->";
+    echo "<!-- DEBUG: Report data count before adding missing students: " . count($reportData) . " -->";
+
+    // CRITICAL FIX: Ensure ALL students appear, even those with no records at all
     foreach ($seenStudents as $studentKey => $studentInfo) {
         $hasRecord = false;
         foreach ($reportData as $row) {
-            if ($row['userId'] == $studentInfo['userId']) {
+            if ($row['studentId'] == $studentInfo['studentId']) {
                 $hasRecord = true;
                 break;
             }
         }
-        
+
         if (!$hasRecord) {
-            $reportData[] = [
+            $missingStudentRecord = [
                 'table_id' => $studentInfo['table_id'],
-                'userId' => $studentInfo['userId'],
+                'studentId' => $studentInfo['studentId'],
                 'firstName' => $studentInfo['firstName'],
                 'lastName' => $studentInfo['lastName'],
                 'sessionId' => null,
                 'markedAt' => null,
                 'attendanceStatus' => null
             ];
+            $reportData[] = $missingStudentRecord;
+            echo "<!-- DEBUG: Added missing student record: " . json_encode($missingStudentRecord) . " -->";
         }
     }
 
-    echo "<!-- Debug: Report data count after deduplication: " . count($reportData) . " -->";
-    echo "<!-- Debug: Students found: " . count($seenStudents) . " -->";
+    echo "<!-- DEBUG: Final report data count: " . count($reportData) . " -->";
+    echo "<!-- DEBUG: Final report data (first 3): " . json_encode(array_slice($reportData, 0, 3)) . " -->";
+
+    return $reportData;
+}
+
+// Function to load cache
+function loadCache($cacheFile)
+{
+    if (!file_exists($cacheFile)) {
+        return null;
+    }
+
+    $cacheData = json_decode(file_get_contents($cacheFile), true);
+    if (!$cacheData) {
+        return null;
+    }
+
+    // Check if cache is older than 1 hour
+    if (isset($cacheData['timestamp']) && (time() - $cacheData['timestamp']) > 3600) {
+        return null;
+    }
+
+    return $cacheData;
+}
+
+// Function to save cache
+function saveCache($cacheFile, $data, $hash)
+{
+    $cacheData = [
+        'timestamp' => time(),
+        'hash' => $hash,
+        'data' => $data
+    ];
+
+    file_put_contents($cacheFile, json_encode($cacheData));
+}
+
+// Handle report generation
+$reportData = [];
+$reportGenerated = false;
+$dataSource = '';
+
+if (isset($_POST['generate_report'])) {
+    $studentId = $_POST['studentId'] ?? 'all'; // use studentId, not table_id
+    $startDate = $_POST['start_date'] ?? '';
+    $endDate = $_POST['end_date'] ?? '';
+
+    // Generate cache key based on filters
+    $cacheKey = md5($studentId . '_' . $startDate . '_' . $endDate);
+    $specificCacheFile = $cacheDir . 'attendance_cache_' . $cacheKey . '.json';
+
+    // Get current database hash
+    $currentHash = getDatabaseHash($conn, $studentId, $startDate, $endDate);
+
+    if ($currentHash === false) {
+        echo "<!-- Error: Could not generate database hash -->";
+        $reportData = fetchDatabaseData($conn, $studentId, $startDate, $endDate);
+        $dataSource = 'database (hash error)';
+    } else {
+        // Try to load cached data
+        $cachedData = loadCache($specificCacheFile);
+
+        if ($cachedData && isset($cachedData['hash']) && $cachedData['hash'] === $currentHash) {
+            // Cache is valid and up to date
+            $reportData = $cachedData['data'];
+            $dataSource = 'cache (up to date)';
+            echo "<!-- Debug: Using cached data (hash match) -->";
+        } else {
+            // Cache is invalid or data has changed - fetch fresh data
+            $reportData = fetchDatabaseData($conn, $studentId, $startDate, $endDate);
+            $dataSource = 'database (fresh fetch)';
+
+            if ($reportData !== false) {
+                // Save new cache
+                saveCache($specificCacheFile, $reportData, $currentHash);
+                echo "<!-- Debug: Fetched fresh data and updated cache -->";
+
+                if ($cachedData) {
+                    echo "<!-- Debug: Cache was outdated (hash mismatch) -->";
+                } else {
+                    echo "<!-- Debug: No cache found, created new cache -->";
+                }
+            } else {
+                echo "<!-- Error: Could not fetch database data -->";
+            }
+        }
+    }
+
+    echo "<!-- Debug: Data source: " . $dataSource . " -->";
+    echo "<!-- Debug: Current hash: " . $currentHash . " -->";
+    echo "<!-- Debug: Report data count: " . count($reportData) . " -->";
+
     $reportGenerated = true;
 }
 
-// Process data for daily attendance calculation
+// Process data for daily attendance calculation (same as original)
 $processedData = [];
 if (!empty($reportData)) {
-    // Debug: Show sample data
-    echo "<!-- Debug: Sample report data: " . json_encode(array_slice($reportData, 0, 2)) . " -->";
-
     foreach ($reportData as $row) {
-        // Use userId as the primary key to avoid duplicates
-        $studentKey = $row['userId'];
+        $studentKey = $row['studentId'];
 
-        // Skip rows with null attendance data but still include the student
         if ($row['markedAt'] === null) {
             if (!isset($processedData[$studentKey])) {
                 $processedData[$studentKey] = [
                     'student_info' => [
                         'name' => $row['firstName'] . ' ' . $row['lastName'],
-                        'id' => $row['userId'],
+                        'id' => $row['studentId'],
                         'table_id' => $row['table_id']
                     ],
                     'daily_attendance' => []
@@ -189,14 +356,13 @@ if (!empty($reportData)) {
             $processedData[$studentKey] = [
                 'student_info' => [
                     'name' => $row['firstName'] . ' ' . $row['lastName'],
-                    'id' => $row['userId'],
+                    'id' => $row['studentId'],
                     'table_id' => $row['table_id']
                 ],
                 'daily_attendance' => []
             ];
         }
 
-        // Initialize day data if not exists
         if (!isset($processedData[$studentKey]['daily_attendance'][$date])) {
             $processedData[$studentKey]['daily_attendance'][$date] = [
                 'sessions' => [],
@@ -205,7 +371,6 @@ if (!empty($reportData)) {
             ];
         }
 
-        // Store session data - ensure attendanceStatus is properly formatted
         $attendanceStatus = $row['attendanceStatus'];
         if ($attendanceStatus === '1' || strtolower($attendanceStatus) === 'present') {
             $attendanceStatus = 'present';
@@ -216,13 +381,7 @@ if (!empty($reportData)) {
         $processedData[$studentKey]['daily_attendance'][$date]['sessions'][$row['sessionId']] = $attendanceStatus;
     }
 
-    // Debug first student
-    if (!empty($processedData)) {
-        $firstStudent = array_values($processedData)[0];
-        echo "<!-- Debug: First student processed data: " . json_encode($firstStudent) . " -->";
-    }
-
-    // Calculate daily attendance status
+    // Calculate daily attendance status (same as original)
     foreach ($processedData as $studentKey => &$studentData) {
         foreach ($studentData['daily_attendance'] as $date => &$dayData) {
             $sessions = $dayData['sessions'];
@@ -244,7 +403,6 @@ if (!empty($reportData)) {
                 $dayData['status'] = 'P';
                 $dayData['late'] = false;
             } else {
-                // Check if first session was missed (assuming session 1 is the first)
                 $firstSessionPresent = isset($sessions['1']) && strtolower($sessions['1']) === 'present';
 
                 if (!$firstSessionPresent && $presentCount >= 1) {
@@ -262,7 +420,7 @@ if (!empty($reportData)) {
     }
 }
 
-// Get unique dates for table headers
+// Get unique dates for table headers (same as original)
 $allDates = [];
 foreach ($processedData as $student) {
     $allDates = array_merge($allDates, array_keys($student['daily_attendance']));
@@ -270,7 +428,6 @@ foreach ($processedData as $student) {
 $allDates = array_unique($allDates);
 sort($allDates);
 
-// If we have a date range specified, include all dates in that range
 if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
     $start = new DateTime($_POST['start_date']);
     $end = new DateTime($_POST['end_date']);
@@ -321,12 +478,12 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
                 <form method="POST" action="" id="reportForm">
                     <div class="filter-row">
                         <div class="filter-group">
-                            <label for="table_id">Student</label>
-                            <select name="table_id" id="table_id">
+                            <label for="studentId">Student</label>
+                            <select name="studentId" id="studentId">
                                 <option value="all">All Students</option>
                                 <?php if ($studentsResult && $studentsResult->num_rows > 0): ?>
                                     <?php while ($student = $studentsResult->fetch_assoc()): ?>
-                                        <option value="<?php echo $student['Id']; ?>" <?php echo (isset($_POST['table_id']) && $_POST['table_id'] == $student['Id']) ? 'selected' : ''; ?>>
+                                        <option value="<?php echo $student['studentId']; ?>" <?php echo (isset($_POST['studentId']) && $_POST['studentId'] == $student['studentId']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($student['firstName'] . ' ' . $student['lastName']); ?>
                                         </option>
                                     <?php endwhile; ?>
@@ -368,6 +525,9 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
                             | Period: <?php echo $_POST['start_date'] ?? 'Start'; ?> to
                             <?php echo $_POST['end_date'] ?? 'End'; ?>
                         <?php endif; ?>
+                        <?php if (!empty($dataSource)): ?>
+                            | Data Source: <?php echo ucfirst(explode(' ', $dataSource)[0]); ?>
+                        <?php endif; ?>
                     </p>
                 </div>
 
@@ -375,11 +535,11 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
                 <div class="attendance-legend">
                     <div class="legend-item">
                         <div class="legend-color present"></div>
-                        <span><strong>P</strong> - Present (Attended all sessions)</span>
+                        <span><strong>P</strong> - Present</span>
                     </div>
                     <div class="legend-item">
                         <div class="legend-color absent"></div>
-                        <span><strong>A</strong> - Absent (Missed all sessions)</span>
+                        <span><strong>A</strong> - Absent</span>
                     </div>
                     <div class="legend-item">
                         <div class="legend-color late"></div>
@@ -396,6 +556,9 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
                 </div>
 
                 <div class="report-actions">
+                    <button class="action-btn refresh-btn" onclick="refreshReport()">
+                        <i class="fas fa-sync-alt"></i> Refresh Data
+                    </button>
                     <button class="action-btn export-excel" onclick="exportToExcel()">
                         <i class="fas fa-file-excel"></i> Export to Excel
                     </button>
@@ -441,7 +604,7 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
                                                 $totalAbsent++;
                                             } elseif ($dayStatus === 'L') {
                                                 $totalLate++;
-                                                $totalPresent++; // Late is still considered present
+                                                $totalPresent++;
                                             } elseif ($dayStatus === 'Partial') {
                                                 $totalPresent++;
                                             }
@@ -507,50 +670,8 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
         </div>
     </div>
 
-    <!-- Logout Modal -->
-    <div class="modal-overlay" id="logoutModal">
-        <div class="modal-box">
-            <h2>Confirm</h2>
-            <p>Are you sure you want to logout?</p>
-            <div class="modal-buttons">
-                <button class="modal-btn yes" id="yesBtn">Yes</button>
-                <button class="modal-btn cancel" id="cancelBtn">Cancel</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            // Logout functionality
-            const logoutElements = document.querySelectorAll('[data-logout="true"], .logout-btn, a[href*="logout.php"]');
-
-            logoutElements.forEach(function (element) {
-                element.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    document.getElementById('logoutModal').style.display = 'flex';
-                });
-            });
-
-            // Modal handlers
-            const yesBtn = document.getElementById('yesBtn');
-            const cancelBtn = document.getElementById('cancelBtn');
-            const modal = document.getElementById('logoutModal');
-
-            if (yesBtn) {
-                yesBtn.onclick = () => window.location.href = "../login.php";
-            }
-
-            if (cancelBtn) {
-                cancelBtn.onclick = () => modal.style.display = 'none';
-            }
-
-            if (modal) {
-                modal.onclick = (e) => {
-                    if (e.target === modal) modal.style.display = 'none';
-                };
-            }
-
             // Auto-set end date when start date is selected
             const startDateInput = document.getElementById('start_date');
             const endDateInput = document.getElementById('end_date');
@@ -566,6 +687,18 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
             }
         });
 
+        // Refresh report function
+        function refreshReport() {
+            // Add a parameter to force refresh
+            const form = document.getElementById('reportForm');
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'force_refresh';
+            input.value = Date.now();
+            form.appendChild(input);
+            form.submit();
+        }
+
         // Export functions
         function exportToExcel() {
             const table = document.getElementById('attendanceTable');
@@ -578,6 +711,50 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
             XLSX.writeFile(wb, filename);
         }
 
+        // function exportToPDF() {
+        //     const table = document.getElementById('attendanceTable');
+        //     if (!table) {
+        //         alert('No table found to export');
+        //         return;
+        //     }
+
+        //     const { jsPDF } = window.jspdf;
+        //     const doc = new jsPDF('l', 'mm', 'a4');
+
+        //     doc.setFontSize(18);
+        //     doc.text('Attendance Report', 20, 20);
+        //     doc.setFontSize(12);
+        //     doc.text('Generated on: ' + new Date().toLocaleDateString(), 20, 30);
+        //     doc.text('P = Present, A = Absent, L = Late, Partial = Partial, - = No Record', 20, 35);
+
+        //     const rows = [];
+        //     const headers = [];
+
+        //     table.querySelectorAll('thead th').forEach(th => {
+        //         headers.push(th.textContent.trim());
+        //     });
+
+        //     table.querySelectorAll('tbody tr').forEach(tr => {
+        //         const row = [];
+        //         tr.querySelectorAll('td').forEach(td => {
+        //             row.push(td.textContent.trim());
+        //         });
+        //         rows.push(row);
+        //     });
+
+        //     doc.autoTable({
+        //         head: [headers],
+        //         body: rows,
+        //         startY: 45,
+        //         styles: { fontSize: 8, cellPadding: 2 },
+        //         headStyles: { fillColor: [248, 249, 250], textColor: [0, 0, 0] },
+        //         columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 30 } }
+        //     });
+
+        //     const filename = 'attendance_report_' + new Date().toISOString().split('T')[0] + '.pdf';
+        //     doc.save(filename);
+        // }
+
         function exportToPDF() {
             const table = document.getElementById('attendanceTable');
             if (!table) {
@@ -588,6 +765,7 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF('l', 'mm', 'a4');
 
+            // Title and date
             doc.setFontSize(18);
             doc.text('Attendance Report', 20, 20);
             doc.setFontSize(12);
@@ -595,27 +773,37 @@ if (!empty($_POST['start_date']) && !empty($_POST['end_date'])) {
             doc.text('P = Present, A = Absent, L = Late, Partial = Partial, - = No Record', 20, 35);
 
             const rows = [];
-            const headers = [];
+            const headers = ['Student ID', 'Student Name', 'Total Present', 'Total Absent', 'Total Late', 'Attendance %'];
 
-            table.querySelectorAll('thead th').forEach(th => {
-                headers.push(th.textContent.trim());
-            });
-
+            // Collect data for the specified columns
             table.querySelectorAll('tbody tr').forEach(tr => {
                 const row = [];
-                tr.querySelectorAll('td').forEach(td => {
-                    row.push(td.textContent.trim());
-                });
+                const studentId = tr.querySelector('td:nth-child(1)').textContent.trim(); // Student ID
+                const studentName = tr.querySelector('td:nth-child(2)').textContent.trim(); // Name
+                const totalPresent = tr.querySelector('td:nth-child(3)').textContent.trim(); // Total Present
+                const totalAbsent = tr.querySelector('td:nth-child(4)').textContent.trim(); // Total Absent
+                const totalLate = tr.querySelector('td:nth-child(5)').textContent.trim(); // Total Late
+                const attendancePercent = tr.querySelector('td:nth-child(6)').textContent.trim(); // Attendance %
+
+                row.push(studentId, studentName, totalPresent, totalAbsent, totalLate, attendancePercent);
                 rows.push(row);
             });
 
+            // Generate the PDF table
             doc.autoTable({
                 head: [headers],
                 body: rows,
                 startY: 45,
                 styles: { fontSize: 8, cellPadding: 2 },
                 headStyles: { fillColor: [248, 249, 250], textColor: [0, 0, 0] },
-                columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 30 } }
+                columnStyles: {
+                    0: { cellWidth: 30 }, // Student ID
+                    1: { cellWidth: 50 }, // Name
+                    2: { cellWidth: 30 }, // Total Present
+                    3: { cellWidth: 30 }, // Total Absent
+                    4: { cellWidth: 30 }, // Total Late
+                    5: { cellWidth: 30 }  // Attendance %
+                }
             });
 
             const filename = 'attendance_report_' + new Date().toISOString().split('T')[0] + '.pdf';

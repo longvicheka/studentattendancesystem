@@ -1,8 +1,8 @@
 <?php
-$host = "localhost:3306";
+$host = "localhost";
 $user = "root";
 $pass = "";
-$dbname = "attendancesystem";
+$dbname = "studentattendancesystem";
 
 $conn = new mysqli($host, $user, $pass, $dbname);
 if ($conn->connect_error) {
