@@ -23,6 +23,25 @@
         <div class="nav-icon"><i class="fa-solid fa-file-lines"></i></div>
         <div class="nav-text">Report</div>
       </a>
+
+      <a href="absent_response.php" class="nav-item <?php if (basename($_SERVER['PHP_SELF']) == 'absent_response.php')
+        echo 'active'; ?>">
+        <div class="nav-icon">
+          <i class="fa-solid fa-bell"></i>
+        </div>
+        <div class="nav-text">Absent Request</div>
+      </a>
+    </div>
+
+    <div class="nav-section">
+      <div class="section-title">Create</div>
+      <a href="create_admin.php" class="nav-item <?php if (basename($_SERVER['PHP_SELF']) == 'create_admin.php')
+        echo 'active'; ?>">
+        <div class="nav-icon">
+          <i class="fa-solid fa-circle-user"></i>
+        </div>
+        <div class="nav-text">Add Admin</div>
+      </a>
     </div>
 
     <div class="nav-section">

@@ -139,3 +139,18 @@ WHERE a1.attendanceId < a2.attendanceId  -- Keep the record with higher ID (usua
     AND DATE(a1.markedAt) = DATE(a2.markedAt)
     AND a1.subjectCode = 'CRM'
     AND DATE(a1.markedAt) = CURDATE();
+
+CREATE TABLE tblabsentrequest (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    studentId VARCHAR(11) NOT NULL,
+    studentName VARCHAR(50) NOT NULL,
+    requestDate DATE NOT NULL,
+    startDate DATE NOT NULL,
+    endDate DATE NOT NULL,
+    reason TEXT NOT NULL,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    adminResponse TEXT NULL,
+    createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    approvedBy INT NULL
+);

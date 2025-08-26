@@ -1,11 +1,10 @@
 <?php
 session_start();
 if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Administrator') {
-  header("Location: ../index.php");
+  header("Location: ../login.php");
   exit();
 }
 
-// include '../Includes/session.php';
 include '../Includes/db.php';
 
 // Set timezone

@@ -1,7 +1,9 @@
 <?php
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
 session_start();
+if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Administrator') {
+    header("Location: ../login.php");
+    exit();
+}
 include '../Includes/db.php';
 
 // Function to check if today is weekend

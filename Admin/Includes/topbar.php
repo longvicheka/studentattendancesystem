@@ -6,7 +6,7 @@ $fullName = '';
 $userType = '';
 
 if ($adminId) {
-  $query = "SELECT firstName, lastName, userType FROM tbladmin WHERE Id = ?";
+  $query = "SELECT firstName, lastName FROM tbladmin WHERE Id = ?";
   $stmt = $conn->prepare($query);
   $stmt->bind_param("i", $adminId);
   $stmt->execute();
@@ -14,7 +14,7 @@ if ($adminId) {
   if ($rs && $rs->num_rows > 0) {
     $rows = $rs->fetch_assoc();
     $fullName = $rows['firstName'] . " " . $rows['lastName'];
-    $userType = $rows['userType'];
+    $userType = 'Administrator';
   }
 }
 ?>

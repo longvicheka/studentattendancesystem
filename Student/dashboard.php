@@ -1,6 +1,10 @@
 <?php
+session_start();
+if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Student') {
+    header("Location: ../login.php");
+    exit();
+}
 include '../Includes/db.php';
-include '../Includes/session.php';
 
 $studentId = $_SESSION['studentId'] ?? null;
 
@@ -54,7 +58,7 @@ if (!empty($subjectFilter)) {
     $types .= "s";
 }
 
-$query .= " ORDER BY classDate ASC, s.subjectName ASC, a.sessionId ASC";
+$query .= " ORDER BY classDate DESC, s.subjectName ASC, a.sessionId ASC";
 $stmt3 = $conn->prepare($query);
 $stmt3->bind_param($types, ...$params);
 $stmt3->execute();

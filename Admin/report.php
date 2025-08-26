@@ -1,5 +1,9 @@
 <?php
 session_start();
+if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Administrator') {
+    header("Location: ../login.php");
+    exit();
+}
 include '../Includes/db.php';
 
 // (Optional) helpful during debugging:
@@ -325,18 +329,6 @@ if (isset($_POST['generate_report'])) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-
-    <!-- <style>
-        .high-attendance { color: #1a7f37; font-weight: 600; }
-        .medium-attendance { color: #b58900; font-weight: 600; }
-        .low-attendance { color: #b00020; font-weight: 600; }
-        .overall-column { background: #f0f0f0; }
-        .no-subject { text-align:center; color:#888; }
-        .percentage-value { text-align:center; }
-        .count-column { text-align:center; }
-        .percentage-column { text-align:center; }
-        .generate-btn, .action-btn { cursor:pointer; }
-    </style> -->
 </head>
 <body>
     <?php include "Includes/topbar.php"; ?>
