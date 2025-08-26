@@ -81,10 +81,19 @@ foreach ($groupedData as &$day) {
     $statuses = $day['sessions'];
     $day['status'] = 'Present';
 
-    if (count(array_unique($statuses)) === 1 && $statuses[0] == '0') {
+    // Check if all sessions are absent (count as 1 total absence)
+    $allAbsent = true;
+    foreach ($statuses as $status) {
+        if ($status !== '0' && $status !== 'Absent') {
+            $allAbsent = false;
+            break;
+        }
+    }
+
+    if ($allAbsent) {
         $day['status'] = 'Absent';
-        $totals['absent']++;
-    } elseif ($statuses[0] == 'Late') {
+        $totals['absent']++; // Count as 1 total absence
+    } elseif (in_array('Late', $statuses)) {
         $day['status'] = 'Late';
         $totals['late']++;
         $totals['present']++;

@@ -243,7 +243,7 @@ function fetchDatabaseData($conn, $studentId = 'all', $subjectCode = 'all', $sta
                 if ($allPresent) {
                     $presentDays++;
                 } elseif ($allAbsent) {
-                    $absentDays++;
+                    $absentDays = 1; // Count as 1 total absence for the day
                 } elseif ($isLate) {
                     $lateDays++;
                     $presentDays++; 

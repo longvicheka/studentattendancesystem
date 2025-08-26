@@ -30,10 +30,18 @@ $presentStmt->execute();
 $presentResult = $presentStmt->get_result();
 $totalPresent = $presentResult ? $presentResult->fetch_assoc()['present'] : 0;
 
-$absentQuery = "SELECT COUNT(DISTINCT a.studentId) as absent 
-                FROM tblattendance a 
-                INNER JOIN tblstudent s ON a.studentId = s.studentId 
-                WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'absent'";
+// Get students who were absent for all their sessions today
+$absentQuery = "
+    SELECT COUNT(*) as absent
+    FROM (
+        SELECT a.studentId
+        FROM tblattendance a 
+        INNER JOIN tblstudent s ON a.studentId = s.studentId 
+        WHERE DATE(a.markedAt) = ? AND s.isActive = 1
+        GROUP BY a.studentId
+        HAVING COUNT(*) = SUM(CASE WHEN a.attendanceStatus = 'absent' THEN 1 ELSE 0 END)
+           AND COUNT(*) > 0
+    ) as absent_students";
 $absentStmt = $conn->prepare($absentQuery);
 $absentStmt->bind_param("s", $today);
 $absentStmt->execute();
@@ -102,10 +110,17 @@ $yesterdayPresentResult = $yesterdayPresentStmt->get_result();
 $yesterdayPresent = $yesterdayPresentResult ? $yesterdayPresentResult->fetch_assoc()['present'] : 0;
 
 // Yesterday's absent count
-$yesterdayAbsentQuery = "SELECT COUNT(DISTINCT a.studentId) as absent 
-                        FROM tblattendance a 
-                        INNER JOIN tblstudent s ON a.studentId = s.studentId 
-                        WHERE DATE(a.markedAt) = ? AND s.isActive = 1 AND a.attendanceStatus = 'absent'";
+$yesterdayAbsentQuery = "
+    SELECT COUNT(*) as absent
+    FROM (
+        SELECT a.studentId
+        FROM tblattendance a 
+        INNER JOIN tblstudent s ON a.studentId = s.studentId 
+        WHERE DATE(a.markedAt) = ? AND s.isActive = 1
+        GROUP BY a.studentId
+        HAVING COUNT(*) = SUM(CASE WHEN a.attendanceStatus = 'absent' THEN 1 ELSE 0 END)
+           AND COUNT(*) > 0
+    ) as absent_students";
 $yesterdayAbsentStmt = $conn->prepare($yesterdayAbsentQuery);
 $yesterdayAbsentStmt->bind_param("s", $yesterday);
 $yesterdayAbsentStmt->execute();
