@@ -550,7 +550,7 @@ $adminResult = $conn->query($adminQuery);
                     immediately.
                 </div>
                 <form method="POST" id="deleteAdminForm">
-                    <input type="hidden" name="admin_id" id="deleteAdminId">
+                    <input type="hidden" name="admin_username" id="deleteAdminId">
                     <input type="hidden" name="delete_admin" value="1">
 
                     <div class="modal-actions">
@@ -695,6 +695,7 @@ $adminResult = $conn->query($adminQuery);
             document.getElementById('deleteAdminId').value = username;
             document.getElementById('deleteModalBody').querySelector('p').innerHTML =
                 `Are you sure you want to delete the administrator account for <strong>${escapeHtml(displayName)}</strong>?`;
+            document.getElementById('deleteAdminModal').style.display = 'block';
         }
         
         // Close modals

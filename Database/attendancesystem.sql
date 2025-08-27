@@ -1,32 +1,37 @@
 CREATE TABLE `tblstudent` (
-  `Id` INT AUTO_INCREMENT PRIMARY KEY,
-  `userId` INT UNIQUE NOT NULL,
-  `firstName` VARCHAR(50) NOT NULL,
-  `lastName` VARCHAR(50) NOT NULL,
-  `email` VARCHAR(100) NOT NULL UNIQUE,
-  `DOB` DATE NOT NULL,
-  `academicYear` VARCHAR(10) NOT NULL,
-  `phoneNumber` VARCHAR(20),
-  `address` TEXT,
-  `password` VARCHAR(255) NOT NULL,
-  `createdAt` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `isActive` TINYINT(1) DEFAULT 1
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `Id` int(11) NOT NULL,
+  `studentId` int(11) NOT NULL,
+  `firstName` varchar(50) NOT NULL,
+  `lastName` varchar(50) NOT NULL,
+  `email` varchar(100) NOT NULL,
+  `DOB` date NOT NULL,
+  `gender` enum('Male','Female','Other') DEFAULT NULL,
+  `academicYear` varchar(10) NOT NULL,
+  `phoneNumber` varchar(20) DEFAULT NULL,
+  `address` text DEFAULT NULL,
+  `password` varchar(255) NOT NULL,
+  `major_id` tinyint(4) NOT NULL,
+  `enrollmentDate` date NOT NULL,
+  `graduationDate` date DEFAULT NULL,
+  `createdAt` datetime DEFAULT current_timestamp(),
+  `createdBy` varchar(50) NOT NULL,
+  `modifiedAt` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `modifiedBy` varchar(50) DEFAULT NULL,
+  `isActive` tinyint(1) DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-INSERT INTO `tblstudent` 
-(`userId`, `firstName`, `lastName`, `email`, `DOB`, `academicYear`, `phoneNumber`, `address`, `password`) 
-VALUES
-(2202001, 'Vicheka', 'Long', 'vicheka.long@gmail.com', '2002-01-15', '2024', '012345678', 'Phnom Penh', SHA2('vicheka@2025', 256)),
-(2202002, 'David', 'Kheang', 'david.kheang@gmail.com', '2001-03-20', '2024', '012345679', 'Phnom Penh', SHA2('david@2025', 256)),
-(2202003, 'Soveha', 'Vat', 'soveha.vat@gmail.com', '2002-06-12', '2024', '012345680', 'Phnom Penh', SHA2('veha@2025', 256)),
-(2202004, 'Yav', 'Sok', 'yav.sok@gmail.com', '2003-02-08', '2024', '012345681', 'Phnom Penh', SHA2('yav@2025', 256)),
-(2202005, 'Sreynit', 'Lay', 'sreynit.lay@gmail.com', '2002-11-30', '2024', '012345682', 'Phnom Penh', SHA2('sreynit@2025', 256)),
-(2202006, 'Kanika', 'Seng', 'kanika.seng@gmail.com', '2001-08-21', '2024', '012345683', 'Phnom Penh', SHA2('kanika@2025', 256)),
-(2202007, 'Thavary', 'Vathna', 'thavary.vathna@gmail.com', '2002-04-25', '2024', '012345684', 'Phnom Penh', SHA2('thavary@2025', 256)),
-(2202008, 'Kirilundi', 'Eav', 'kirilundi.eav@gmail.com', '2002-09-19', '2024', '012345685', 'Phnom Penh', SHA2('lundi@2025', 256)),
-(2202009, 'Sophea', 'Chan', 'sophea.chan@gmail.com', '2003-05-14', '2024', '012345686', 'Phnom Penh', SHA2('sophea@2025', 256)),
-(2202010, 'Chhayheng', 'Koung', 'chhayheng.koung@gmail.com', '2002-12-01', '2024', '012345687', 'Phnom Penh', SHA2('chhayheng@2025', 256)),
-(2202011, 'Rithychey', 'Hongsoth', 'rithychey.hongsoth@gmail.com', '2001-10-17', '2024', '012345688', 'Phnom Penh', SHA2('rithychey@2025', 256));
+INSERT INTO `tblstudent` (`Id`, `studentId`, `firstName`, `lastName`, `email`, `DOB`, `gender`, `academicYear`, `phoneNumber`, `address`, `password`, `major_id`, `enrollmentDate`, `graduationDate`, `createdAt`, `createdBy`, `modifiedAt`, `modifiedBy`, `isActive`) VALUES
+(1, 2202001, 'Vicheka', 'Long', 'vicheka.long@gmail.com', '2002-01-15', NULL, '4', '012345678', 'Phnom Penh', '$2y$10$Rwa3tuEkKaWhl8g3XnExZuhsbISOJ.jaaxomKzNjcDaqpFISvZdbS', 2, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(2, 2202002, 'David', 'Kheang', 'david.kheang@gmail.com', '2001-03-20', NULL, '4', '012345679', 'Phnom Penh', '$2y$10$4Dxdw1dC3uMVs4gONWn9P.Dd2SUNXbWixGFvquFRhKEDJeQc7ZkoO', 2, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(3, 2202003, 'Soveha', 'Vat', 'soveha.vat@gmail.com', '2002-06-12', NULL, '4', '012345680', 'Phnom Penh', '$2y$10$Gf2h1zu2Sb7JsWHMBJl86.V.czLwFTxmAsNZ88etEDq9qhIrFraK.', 2, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(4, 2202004, 'Yav', 'Sok', 'yav.sok@gmail.com', '2003-02-08', NULL, '4', '012345681', 'Phnom Penh', '$2y$10$QGZCZ9DIEus0GdvKBXvQ2eXejzaQzEJbuzqLDhEZarnedpFc/8MeG', 3, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(5, 2202005, 'Sreynit', 'Lay', 'sreynit.lay@gmail.com', '2002-11-30', NULL, '4', '012345682', 'Phnom Penh', '$2y$10$Xr2pXBheWkIaoVz8KmLZEun5NcPARoi.XPfDWh5t6lScLhhDqufUm', 3, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(6, 2202006, 'Kanika', 'Seng', 'kanika.seng@gmail.com', '2001-08-21', NULL, '4', '012345683', 'Phnom Penh', '$2y$10$0bqD4gYtw53gmHsQxESDqeVshuDMxxc4yp8SK7i/a6f7NWWQookJG', 3, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(7, 2202007, 'Thavary', 'Vathna', 'thavary.vathna@gmail.com', '2002-04-25', NULL, '4', '012345684', 'Phnom Penh', '$2y$10$CXJXWtAFKJcNkPss8EFAv.XGsNV9fWrq4H8rAalrfOIbJ.PCFB6x.', 1, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(8, 2202008, 'Kirilundi', 'Eav', 'kirilundi.eav@gmail.com', '2002-09-19', NULL, '4', '012345685', 'Phnom Penh', '$2y$10$iFpY.MTxyKV2Ahz59YsaEejHj8hwujHxC.cVP9rhr3Z4TOsrgdh3a', 4, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(9, 2202009, 'Sophea', 'Chan', 'sophea.chan@gmail.com', '2003-05-14', NULL, '4', '012345686', 'Phnom Penh', '$2y$10$Vlr6jROBMC7vMMTRYjX9POfc4znpqvaqasKkAtAbQoQ6iGesshkz6', 4, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(10, 2202010, 'Chhayheng', 'Koung', 'chhayheng.koung@gmail.com', '2002-12-01', NULL, '4', '012345687', 'Phnom Penh', '$2y$10$oXBBEZeUnGHxQejPn84TX.c2Q8JAF/aEb6QKueCA6B3PwZioz7Fum', 1, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1),
+(11, 2202011, 'Rithychey', 'Hongsoth', 'rithychey.hongsoth@gmail.com', '2001-10-17', NULL, '4', '012345688', 'Phnom Penh', '$2y$10$argm1cnRKieqM97.XK314eOM1ijgv/jdv4alLj8tfg88PCQ8jM1eK', 4, '2021-02-01', NULL, '2025-08-15 03:56:46', 'admin', '2025-08-27 02:01:56', NULL, 1);
 
 CREATE TABLE tblattendance (
   attendanceId INT PRIMARY KEY AUTO_INCREMENT,
@@ -39,7 +44,6 @@ CREATE TABLE tblattendance (
   modifiedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   modifiedBy VARCHAR(50) DEFAULT 'admin'
 );
-
 
 INSERT INTO tblAttendance (sessionId, studentId, attendanceStatus, markedAt, markedBy, remarks, modifiedAt, modifiedBy) VALUES
 (1, 2202001, 'Absent', '2025-07-01 08:00:00', 'admin', 'Sick', '2025-07-01 08:00:00', 'admin'),
@@ -154,3 +158,22 @@ CREATE TABLE tblabsentrequest (
     updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     approvedBy INT NULL
 );
+
+CREATE TABLE tblmajor (
+    major_id INT AUTO_INCREMENT PRIMARY KEY,
+    major_code VARCHAR(10) NOT NULL UNIQUE,
+    major_name VARCHAR(100) NOT NULL,
+
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    createdBy VARCHAR(50) NOT NULL,
+    modifiedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    modifiedBy VARCHAR(50) NULL
+);
+
+INSERT INTO tblmajor (major_code, major_name, createdBy) VALUES
+('ACC', 'Accounting', 'admin'),
+('BIS', 'Business Information System', 'admin'),
+('BM', 'Business Management', 'admin'),
+('H&T', 'Hospitality & Tourism', 'admin'),
+('B&F', 'Banking & Finance', 'admin'),
+('LSC', 'Logistics & Supply Chain Management', 'admin');
