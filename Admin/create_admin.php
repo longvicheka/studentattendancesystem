@@ -382,6 +382,7 @@ $adminResult = $conn->query($adminQuery);
 <body>
     <?php include "Includes/topbar.php"; ?>
     <?php include "Includes/sidebar.php"; ?>
+    <?php include '../Includes/logout_confirmation.php'; ?>
 
     <div class="main-content">
         <!-- Page Header -->

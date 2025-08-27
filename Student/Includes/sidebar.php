@@ -21,8 +21,8 @@
 
         <div class="nav-section">
             <div class="section-title">System</div>
-            <a href="../login.php" class="nav-item logout-link <?php if (basename($_SERVER['PHP_SELF']) == 'logout.php')
-                echo 'active'; ?>">
+<a href="#" class="nav-item logout-link <?php if (basename($_SERVER['PHP_SELF']) == 'logout.php')
+                echo 'active'; ?>" onclick="showLogoutConfirmation(event)">
                 <div class="nav-icon">
                     <i class="fa-solid fa-right-from-bracket"></i>
                 </div>

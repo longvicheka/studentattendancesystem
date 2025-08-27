@@ -17,14 +17,14 @@ if (strpos($current_page, '/Admin/') !== false) {
             $stmt->bind_param("i", $adminId);
             $stmt->execute();
             $rs = $stmt->get_result();
-            
+
             if ($rs && $rs->num_rows === 0) {
                 // Admin no longer exists in database, clear session
                 session_unset();
                 session_destroy();
             }
         }
-        
+
         echo "<script type = \"text/javascript\">
         window.location = (\"../login.php\");
         </script>";
@@ -41,14 +41,14 @@ if (strpos($current_page, '/Admin/') !== false) {
             $stmt->bind_param("s", $studentId);
             $stmt->execute();
             $rs = $stmt->get_result();
-            
+
             if ($rs && $rs->num_rows === 0) {
                 // Student no longer exists in database, clear session
                 session_unset();
                 session_destroy();
             }
         }
-        
+
         echo "<script type = \"text/javascript\">
         window.location = (\"../login.php\");
         </script>";

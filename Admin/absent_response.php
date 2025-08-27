@@ -67,6 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Get filter parameters
 $statusFilter = $_GET['status'] ?? 'all';
 $dateFilter = $_GET['date'] ?? 'all';
+$yearFilter = $_GET['academicYear'] ?? 'all';
 
 // Build the query based on filters
 $whereConditions = [];
@@ -87,6 +88,12 @@ if ($dateFilter === 'today') {
     $whereConditions[] = "createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
 }
 
+if ($yearFilter !== 'all') {
+    $whereConditions[] = "academicYear = ?";
+    $params[] = $yearFilter;
+    $types .= 's';
+}
+
 $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
 
 // Get statistics
@@ -95,15 +102,31 @@ $statsQuery = "SELECT
     SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
     SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
     SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
-    FROM tblabsentrequest";
+    FROM tblabsentrequest $whereClause";
 
-$statsResult = $conn->query($statsQuery);
-$stats = $statsResult ? $statsResult->fetch_assoc() : [
-    'total' => 0,
-    'pending' => 0,
-    'approved' => 0,
-    'rejected' => 0
-];
+$statsStmt = $conn->prepare($statsQuery);
+if ($statsStmt && !empty($params)) {
+    $statsStmt->bind_param($types, ...$params);
+}
+
+if ($statsStmt) {
+    $statsStmt->execute();
+    $statsResult = $statsStmt->get_result();
+    $stats = $statsResult ? $statsResult->fetch_assoc() : [
+        'total' => 0,
+        'pending' => 0,
+        'approved' => 0,
+        'rejected' => 0
+    ];
+} else {
+    $statsResult = $conn->query($statsQuery);
+    $stats = $statsResult ? $statsResult->fetch_assoc() : [
+        'total' => 0,
+        'pending' => 0,
+        'approved' => 0,
+        'rejected' => 0
+    ];
+}
 ?>
 
 <!DOCTYPE html>
@@ -544,11 +567,25 @@ $stats = $statsResult ? $statsResult->fetch_assoc() : [
                             </select>
                         </div>
 
-                        <!-- <div class="filter-group">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fa-solid fa-filter"></i> Filter
-                            </button>
-                        </div> -->
+                        <div class="filter-group">
+                            <label for="academicYear">Academic Year</label>
+                            <select name="academicYear" id="academicYear">
+                                <option value="all" <?php echo $yearFilter === 'all' ? 'selected' : ''; ?>>All Years
+                                </option>
+                                <?php
+                                // Get distinct academic years from the database
+                                $yearQuery = "SELECT DISTINCT academicYear FROM tblabsentrequest WHERE academicYear IS NOT NULL ORDER BY academicYear DESC";
+                                $yearResult = $conn->query($yearQuery);
+                                if ($yearResult && $yearResult->num_rows > 0) {
+                                    while ($yearRow = $yearResult->fetch_assoc()) {
+                                        $selected = $yearFilter === $yearRow['academicYear'] ? 'selected' : '';
+                                        echo '<option value="' . htmlspecialchars($yearRow['academicYear']) . '" ' . $selected . '>' . htmlspecialchars($yearRow['academicYear']) . '</option>';
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+
                     </div>
                 </form>
             </div>
@@ -559,12 +596,12 @@ $stats = $statsResult ? $statsResult->fetch_assoc() : [
                 <?php
                 // Get filtered requests
                 $query = "SELECT * FROM tblabsentrequest $whereClause ORDER BY 
-                      CASE 
-                          WHEN status = 'pending' THEN 1 
-                          WHEN status = 'approved' THEN 2 
-                          ELSE 3 
-                      END,
-                      createdAt DESC";
+      CASE 
+          WHEN status = 'pending' THEN 1 
+          WHEN status = 'approved' THEN 2 
+          ELSE 3 
+      END,
+      createdAt DESC";
 
                 $stmt = $conn->prepare($query);
                 if ($stmt && !empty($params)) {
@@ -994,6 +1031,10 @@ $stats = $statsResult ? $statsResult->fetch_assoc() : [
             document.getElementById('filterForm').submit();
         });
 
+        document.getElementById('academicYear').addEventListener('change', function () {
+            document.getElementById('filterForm').submit();
+        });
+
         // Refresh page periodically to show new requests (every 5 minutes)
         setInterval(function () {
             // Only refresh if no modal is open
@@ -1005,25 +1046,75 @@ $stats = $statsResult ? $statsResult->fetch_assoc() : [
 
 </body>
 
+<?php include '../Includes/logout_confirmation.php'; ?>
+
 </html>
 
 <?php
 // Handle AJAX request for statistics update
 if (isset($_GET['action']) && $_GET['action'] === 'get_stats') {
+    // Get filter parameters from the request
+    $statusFilter = $_GET['status'] ?? 'all';
+    $dateFilter = $_GET['date'] ?? 'all';
+    $yearFilter = $_GET['academicYear'] ?? 'all';
+
+    // Build the query based on filters
+    $whereConditions = [];
+    $params = [];
+    $types = '';
+
+    if ($statusFilter !== 'all') {
+        $whereConditions[] = "status = ?";
+        $params[] = $statusFilter;
+        $types .= 's';
+    }
+
+    if ($dateFilter === 'today') {
+        $whereConditions[] = "DATE(createdAt) = CURDATE()";
+    } elseif ($dateFilter === 'week') {
+        $whereConditions[] = "createdAt >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+    } elseif ($dateFilter === 'month') {
+        $whereConditions[] = "createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    }
+
+    if ($yearFilter !== 'all') {
+        $whereConditions[] = "academicYear = ?";
+        $params[] = $yearFilter;
+        $types .= 's';
+    }
+
+    $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+
     $statsQuery = "SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
-        FROM tblabsentrequest";
+        FROM tblabsentrequest $whereClause";
 
-    $statsResult = $conn->query($statsQuery);
-    $stats = $statsResult ? $statsResult->fetch_assoc() : [
-        'total' => 0,
-        'pending' => 0,
-        'approved' => 0,
-        'rejected' => 0
-    ];
+    $statsStmt = $conn->prepare($statsQuery);
+    if ($statsStmt && !empty($params)) {
+        $statsStmt->bind_param($types, ...$params);
+    }
+
+    if ($statsStmt) {
+        $statsStmt->execute();
+        $statsResult = $statsStmt->get_result();
+        $stats = $statsResult ? $statsResult->fetch_assoc() : [
+            'total' => 0,
+            'pending' => 0,
+            'approved' => 0,
+            'rejected' => 0
+        ];
+    } else {
+        $statsResult = $conn->query($statsQuery);
+        $stats = $statsResult ? $statsResult->fetch_assoc() : [
+            'total' => 0,
+            'pending' => 0,
+            'approved' => 0,
+            'rejected' => 0
+        ];
+    }
 
     header('Content-Type: application/json');
     echo json_encode($stats);

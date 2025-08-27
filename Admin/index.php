@@ -274,14 +274,7 @@ $sessionDataJson = json_encode($sessionData);
       </div>
     </div>
 
-    <div id="logoutConfirmation" class="logout-confirmation" style="display: none;">
-      <h2 class="confirmation-title">Logout Confirmation</h2>
-      <p class="confirmation-message">Are you sure you want to logout?</p>
-      <div class="confirmation-buttons">
-        <button id="confirmLogout" class="btn btn-primary">Yes, Logout</button>
-        <button id="cancelLogout" class="btn btn-secondary">Cancel</button>
-      </div>
-    </div>
+<?php include '../Includes/logout_confirmation.php'; ?>
   </div>
 
   <script>

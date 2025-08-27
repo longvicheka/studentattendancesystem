@@ -6,7 +6,6 @@ if (!isset($_SESSION['userType']) || $_SESSION['userType'] !== 'Administrator') 
 }
 include '../Includes/db.php';
 
-// (Optional) helpful during debugging:
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -14,6 +13,14 @@ error_reporting(E_ALL);
 if (!$conn) {
     die("Connection failed: " . mysqli_connect_error());
 }
+
+// Get selected filters from POST or set defaults
+$studentId = $_POST['studentId'] ?? 'all';
+$subjectCode = $_POST['subjectCode'] ?? 'all';
+$startDate = $_POST['start_date'] ?? '';
+$endDate = $_POST['end_date'] ?? '';
+$selectedYear = $_POST['year'] ?? 'all';
+$selectedMajor = $_POST['major'] ?? 'all';
 
 $cacheDir = '../cache/reports/';
 if (!file_exists($cacheDir)) {
@@ -37,8 +44,15 @@ function loadCache($cacheFile)
     if (!file_exists($cacheFile)) return null;
     $cacheData = json_decode(file_get_contents($cacheFile), true);
     if (!$cacheData) return null;
-    // expire after 1 hour
-    if (isset($cacheData['timestamp']) && (time() - $cacheData['timestamp']) > 3600) return null;
+
+    // Dynamic expiration strategy
+    $expirationTime = 3600; 
+    if (isset($cacheData['expiration'])) {
+        $expirationTime = $cacheData['expiration'];
+    }
+
+    // Check if cache is expired
+    if (isset($cacheData['timestamp']) && (time() - $cacheData['timestamp']) > $expirationTime) return null;
     return $cacheData;
 }
 
@@ -47,12 +61,33 @@ function saveCache($cacheFile, $data, $hash)
     $cacheData = [
         'timestamp' => time(),
         'hash' => $hash,
-        'data' => $data
+        'data' => $data,
+        'expiration' => 3600 
     ];
-    file_put_contents($cacheFile, json_encode($cacheData));
+
+    // Compress data before saving
+    $compressedData = gzcompress(json_encode($cacheData));
+    file_put_contents($cacheFile, $compressedData);
+    
+    $cacheDir = dirname($cacheFile) . '/';
+    manageCacheSize($cacheDir);
 }
 
-function getDatabaseHash($conn, $studentId = 'all', $subjectCode = 'all', $startDate = '', $endDate = '')
+// New function to manage cache size
+function manageCacheSize($cacheDir, $maxFiles = 5)
+{
+    $files = glob($cacheDir . 'attendance_cache_*.json');
+    if (count($files) > $maxFiles) {
+        usort($files, function($a, $b) {
+            return filemtime($a) - filemtime($b);
+        });
+        while (count($files) > $maxFiles) {
+            unlink(array_shift($files));
+        }
+    }
+}
+
+function getDatabaseHash($conn, $studentId = 'all', $subjectCode = 'all', $startDate = '', $endDate = '', $academicYear = 'all', $major = 'all')
 {
     $sql = "SELECT COUNT(*) as total_records, MAX(a.markedAt) as last_modified
             FROM tblstudent s
@@ -81,6 +116,16 @@ function getDatabaseHash($conn, $studentId = 'all', $subjectCode = 'all', $start
         $params[] = $endDate;
         $types .= 's';
     }
+    if ($academicYear !== 'all') {
+        $conds[] = "s.academicYear = ?";
+        $params[] = $academicYear;
+        $types .= 's';
+    }
+    if ($major !== 'all') {
+        $conds[] = "s.major_id = ?";
+        $params[] = $major;
+        $types .= 's';
+    }
 
     if ($conds) {
         $sql .= " WHERE " . implode(" AND ", $conds);
@@ -101,7 +146,7 @@ function getDatabaseHash($conn, $studentId = 'all', $subjectCode = 'all', $start
     return md5(($row['total_records'] ?? '0') . ($row['last_modified'] ?? ''));
 }
 
-function fetchDatabaseData($conn, $studentId = 'all', $subjectCode = 'all', $startDate = '', $endDate = '')
+function fetchDatabaseData($conn, $studentId = 'all', $subjectCode = 'all', $startDate = '', $endDate = '', $academicYear = 'all', $major = 'all')
 {
     // Keep date filters in JOIN so LEFT JOIN remains left
     $sql = "
@@ -126,6 +171,8 @@ function fetchDatabaseData($conn, $studentId = 'all', $subjectCode = 'all', $sta
            AND (? = '' OR DATE(a.markedAt) <= ?)
         WHERE (? = 'all' OR s.studentId = ?)
           AND (? = 'all' OR ss.subjectCode = ?)
+          AND (? = 'all' OR s.academicYear = ?)
+          AND (? = 'all' OR s.major_id = ?)
         ORDER BY s.studentId, ss.subjectCode, attendance_date, a.sessionId
     ";
 
@@ -136,11 +183,13 @@ function fetchDatabaseData($conn, $studentId = 'all', $subjectCode = 'all', $sta
     }
 
     $stmt->bind_param(
-        "ssssssss",
+        "ssssssssssss",
         $startDate, $startDate,
         $endDate,   $endDate,
         $studentId, $studentId,
-        $subjectCode, $subjectCode
+        $subjectCode, $subjectCode,
+        $academicYear, $academicYear,
+        $major, $major
     );
 
     if (!$stmt->execute()) {
@@ -288,14 +337,16 @@ if (isset($_POST['generate_report'])) {
     $subjectCode = $_POST['subjectCode'] ?? 'all';
     $startDate   = $_POST['start_date']  ?? '';
     $endDate     = $_POST['end_date']    ?? '';
+    $academicYear = $_POST['year']       ?? 'all';
+    $major       = $_POST['major']       ?? 'all';
 
-    $cacheKey = md5($studentId . '_' . $subjectCode . '_' . $startDate . '_' . $endDate);
+    $cacheKey = md5($studentId . '_' . $subjectCode . '_' . $startDate . '_' . $endDate . '_' . $academicYear . '_' . $major);
     $specificCacheFile = $cacheDir . 'attendance_cache_' . $cacheKey . '.json';
 
-    $currentHash = getDatabaseHash($conn, $studentId, $subjectCode, $startDate, $endDate);
+    $currentHash = getDatabaseHash($conn, $studentId, $subjectCode, $startDate, $endDate, $academicYear, $major);
 
     if ($currentHash === false) {
-        $reportData = fetchDatabaseData($conn, $studentId, $subjectCode, $startDate, $endDate);
+        $reportData = fetchDatabaseData($conn, $studentId, $subjectCode, $startDate, $endDate, $academicYear, $major);
         $dataSource = 'database (hash error)';
     } else {
         $cachedData = loadCache($specificCacheFile);
@@ -303,7 +354,7 @@ if (isset($_POST['generate_report'])) {
             $reportData = $cachedData['data'];
             $dataSource = 'cache (up to date)';
         } else {
-            $reportData = fetchDatabaseData($conn, $studentId, $subjectCode, $startDate, $endDate);
+            $reportData = fetchDatabaseData($conn, $studentId, $subjectCode, $startDate, $endDate, $academicYear, $major);
             $dataSource = 'database (fresh fetch)';
             if ($reportData !== false) {
                 saveCache($specificCacheFile, $reportData, $currentHash);
@@ -393,8 +444,55 @@ if (isset($_POST['generate_report'])) {
                                    value="<?php echo isset($_POST['end_date']) ? htmlspecialchars($_POST['end_date']) : ''; ?>">
                         </div>
 
+                        <?php
+                        // Get academic years from database
+                        $yearsQuery = "SELECT DISTINCT academicYear FROM tblstudent WHERE isActive = 1 ORDER BY academicYear";
+                        $yearsResult = $conn->query($yearsQuery);
+                        $academicYears = [];
+                        if ($yearsResult && $yearsResult->num_rows > 0) {
+                            while ($row = $yearsResult->fetch_assoc()) {
+                                $academicYears[] = $row['academicYear'];
+                            }
+                        }
+
+                        // Get majors from database
+                        $majorsQuery = "SELECT major_id, major_name FROM tblmajor WHERE isDeleted = 0 ORDER BY major_name";
+                        $majorsResult = $conn->query($majorsQuery);
+                        $majors = [];
+                        if ($majorsResult && $majorsResult->num_rows > 0) {
+                            while ($row = $majorsResult->fetch_assoc()) {
+                                $majors[] = $row;
+                            }
+                        }
+                        ?>
+
                         <div class="filter-group">
-                            <label>&nbsp;</label>
+                            <label for="year">Academic Year</label>
+                            <select name="year" id="year">
+                                <option value="all" <?php echo ($selectedYear === 'all') ? 'selected' : ''; ?>>All Years</option>
+                                <?php foreach ($academicYears as $year): ?>
+                                    <option value="<?php echo htmlspecialchars($year); ?>" <?php echo ($selectedYear == $year) ? 'selected' : ''; ?>>
+                                        Year <?php echo htmlspecialchars($year); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                                </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="major">Major</label>
+                            <select name="major" id="major">
+                                <option value="all" <?php echo ($selectedMajor === 'all') ? 'selected' : ''; ?>>All Majors</option>
+                                <?php foreach ($majors as $major): ?>
+                                    <option value="<?php echo htmlspecialchars($major['major_id']); ?>" <?php echo ($selectedMajor == $major['major_id']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($major['major_name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-row">
+                        <div class="filter-group">
                             <button type="submit" name="generate_report" class="generate-btn">
                                 <i class="fas fa-chart-bar"></i> Generate Report
                             </button>
@@ -487,15 +585,15 @@ if (isset($_POST['generate_report'])) {
                                             <?php endif; ?>
                                         <?php endforeach; ?>
 
-                                        <td class="count-column overall-column"><?php echo (int)$studentData['overall_stats']['total_present']; ?></td>
-                                        <td class="count-column overall-column"><?php echo (int)$studentData['overall_stats']['total_absent']; ?></td>
-                                        <td class="count-column overall-column"><?php echo (int)$studentData['overall_stats']['total_late']; ?></td>
-                                        <td class="count-column overall-column"><?php echo (int)$studentData['overall_stats']['total_sessions']; ?></td>
+                                        <td class="count-column overall-column-data"><?php echo (int)$studentData['overall_stats']['total_present']; ?></td>
+                                        <td class="count-column overall-column-data"><?php echo (int)$studentData['overall_stats']['total_absent']; ?></td>
+                                        <td class="count-column overall-column-data"><?php echo (int)$studentData['overall_stats']['total_late']; ?></td>
+                                        <td class="count-column overall-column-data"><?php echo (int)$studentData['overall_stats']['total_sessions']; ?></td>
                                         <?php 
                                             $overallPercentage = $studentData['overall_stats']['overall_percentage'];
                                             $overallCssClass = ($overallPercentage >= 75) ? 'high-attendance' : (($overallPercentage >= 50) ? 'medium-attendance' : 'low-attendance');
                                         ?>
-                                        <td class="percentage-value overall-column <?php echo $overallCssClass; ?>"><?php echo $overallPercentage; ?>%</td>
+                                        <td class="percentage-value overall-column-data <?php echo $overallCssClass; ?>"><?php echo $overallPercentage; ?>%</td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -647,21 +745,34 @@ if (isset($_POST['generate_report'])) {
                     .attendance-table {
                         width: 100% !important; font-size: ${fontSize} !important;
                         border-collapse: collapse; table-layout: fixed;
+                        -webkit-print-color-adjust: exact;
+                        color-adjust: exact;
                     }
                     .attendance-table th, .attendance-table td {
                         padding: ${cellPadding} !important; border: 1px solid #333 !important;
                         word-wrap: break-word; font-size: ${fontSize} !important; line-height: 1.1 !important; overflow: hidden;
+                        -webkit-print-color-adjust: exact;
+                        color-adjust: exact;
                     }
                     .attendance-table th:first-child, .attendance-table td:first-child { width: 8% !important; }
                     .attendance-table th:nth-child(2), .attendance-table td:nth-child(2) { width: 12% !important; }
                     .percentage-column, .count-column { width: auto !important; text-align: center !important; }
                     .report-title { font-size: 14px !important; margin-bottom: 3px !important; }
                     .report-subtitle { font-size: 9px !important; margin-bottom: 8px !important; }
-                    .report-legend { font-size: 7px !important; margin-top: 8px !important; padding: 3px !important; }
+                    .report-legend { 
+                        font-size: 7px !important; margin-top: 8px !important; padding: 3px !important; 
+                        -webkit-print-color-adjust: exact;
+                        color-adjust: exact;
+                    }
+                    .report-legend h4 { font-size: 8px !important; margin-bottom: 2px !important; }
+                    .report-legend p { font-size: 6px !important; margin: 1px 0 !important; }
                     .table-container { overflow: visible !important; }
-                    .high-attendance { font-weight: bold !important; }
-                    .low-attendance { text-decoration: underline !important; }
-                    .overall-column { background-color: #e8e8e8 !important; -webkit-print-color-adjust: exact; }
+                    .high-attendance, .medium-attendance, .low-attendance, .overall-column { 
+                        color: black !important; 
+                        font-weight: bold !important; 
+                    }
+                    .overall-column { background-color: #8A0054 !important; color: white !important; }
+                    .overall-column-data { font-weight: bold !important; }
                 </style>
             `;
 
@@ -678,5 +789,7 @@ if (isset($_POST['generate_report'])) {
             }, 1000);
         }
     </script>
+    
+    <?php include '../Includes/logout_confirmation.php'; ?>
 </body>
 </html>

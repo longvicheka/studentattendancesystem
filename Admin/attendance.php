@@ -19,6 +19,8 @@ date_default_timezone_set('Asia/Phnom_Penh');
 $selectedDate = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
 // Get selected subject from URL parameter, default to 'all'
 $selectedSubject = isset($_GET['subject']) ? $_GET['subject'] : 'all';
+$selectedYear = isset($_GET['year']) ? $_GET['year'] : 'all'; // Get selected academic year from URL parameter, default to 'all'
+$selectedMajor = isset($_GET['major']) ? $_GET['major'] : 'all'; // Get selected major from URL parameter, default to 'all'
 
 // Validate the date format
 if (!DateTime::createFromFormat('Y-m-d', $selectedDate)) {
@@ -61,6 +63,26 @@ function getSubjectsForDate($conn, $dayOfWeek)
 
 // Get subjects for the selected day
 $availableSubjects = getSubjectsForDate($conn, $dayOfWeek);
+
+// Get academic years from database
+$yearsQuery = "SELECT DISTINCT academicYear FROM tblstudent WHERE isActive = 1 ORDER BY academicYear";
+$yearsResult = $conn->query($yearsQuery);
+$academicYears = [];
+if ($yearsResult && $yearsResult->num_rows > 0) {
+    while ($row = $yearsResult->fetch_assoc()) {
+        $academicYears[] = $row['academicYear'];
+    }
+}
+
+// Get majors from database
+$majorsQuery = "SELECT major_id, major_name FROM tblmajor WHERE isDeleted = 0 ORDER BY major_name";
+$majorsResult = $conn->query($majorsQuery);
+$majors = [];
+if ($majorsResult && $majorsResult->num_rows > 0) {
+    while ($row = $majorsResult->fetch_assoc()) {
+        $majors[] = $row;
+    }
+}
 
 // Check if selected subject is valid for the selected date
 $isValidSubjectForDate = false;
@@ -173,14 +195,40 @@ if ($showAttendance && $isValidSubjectForDate) {
             LEFT JOIN tblattendance a3 ON s.studentId = a3.studentId AND ss.subjectCode = a3.subjectCode 
                 AND DATE(a3.markedAt) = ? AND a3.sessionId = 3
             WHERE s.isActive = 1 AND sub.isActive = 1
-            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)
-            ORDER BY s.firstName, s.lastName, s.studentId, sub.subjectName";
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)";
+        
+        // Add academic year filter if selected
+        if ($selectedYear !== 'all') {
+            $query .= " AND s.academicYear = ?";
+        }
+        
+        // Add major filter if selected
+        if ($selectedMajor !== 'all') {
+            $query .= " AND s.major_id = ?";
+        }
+        
+        $query .= " ORDER BY s.firstName, s.lastName, s.studentId, sub.subjectName";
 
         $stmt = $conn->prepare($query);
         if (!$stmt) {
             die("Prepare failed for main query (all subjects): " . $conn->error);
         }
-        $stmt->bind_param("sssi", $selectedDate, $selectedDate, $selectedDate, $dayOfWeek);
+        
+        // Build bind parameters dynamically
+        $paramTypes = "sssi";
+        $paramValues = [$selectedDate, $selectedDate, $selectedDate, $dayOfWeek];
+        
+        if ($selectedYear !== 'all') {
+            $paramTypes .= "s";
+            $paramValues[] = $selectedYear;
+        }
+        
+        if ($selectedMajor !== 'all') {
+            $paramTypes .= "s";
+            $paramValues[] = $selectedMajor;
+        }
+        
+        $stmt->bind_param($paramTypes, ...$paramValues);
 
     } else {
         // For specific subject - each student appears only once
@@ -204,14 +252,40 @@ if ($showAttendance && $isValidSubjectForDate) {
             LEFT JOIN tblattendance a3 ON s.studentId = a3.studentId AND ss.subjectCode = a3.subjectCode 
                 AND DATE(a3.markedAt) = ? AND a3.sessionId = 3
             WHERE s.isActive = 1 AND sub.isActive = 1 AND ss.subjectCode = ?
-            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)
-            ORDER BY s.firstName, s.lastName, s.studentId";
+            AND (sub.scheduledDay IS NULL OR sub.scheduledDay = '' OR FIND_IN_SET(?, sub.scheduledDay) > 0)";
+        
+        // Add academic year filter if selected
+        if ($selectedYear !== 'all') {
+            $query .= " AND s.academicYear = ?";
+        }
+        
+        // Add major filter if selected
+        if ($selectedMajor !== 'all') {
+            $query .= " AND s.major_id = ?";
+        }
+        
+        $query .= " ORDER BY s.firstName, s.lastName, s.studentId";
 
         $stmt = $conn->prepare($query);
         if (!$stmt) {
             die("Prepare failed for main query (specific subject): " . $conn->error);
         }
-        $stmt->bind_param("ssssi", $selectedDate, $selectedDate, $selectedDate, $selectedSubject, $dayOfWeek);
+        
+        // Build bind parameters dynamically
+        $paramTypes = "ssssi";
+        $paramValues = [$selectedDate, $selectedDate, $selectedDate, $selectedSubject, $dayOfWeek];
+        
+        if ($selectedYear !== 'all') {
+            $paramTypes .= "s";
+            $paramValues[] = $selectedYear;
+        }
+        
+        if ($selectedMajor !== 'all') {
+            $paramTypes .= "s";
+            $paramValues[] = $selectedMajor;
+        }
+        
+        $stmt->bind_param($paramTypes, ...$paramValues);
     }
 
     if (!$stmt->execute()) {
@@ -356,6 +430,141 @@ if ($showAttendance && $isValidSubjectForDate) {
         .student-row:hover {
             background-color: #e3f2fd;
         }
+
+        /* Improved filter container alignment */
+        .search-and-date-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 100%;
+        }
+
+        .filter-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: flex-start;
+        }
+
+        .subject-filter-container,
+        .year-filter-container,
+        .major-filter-container,
+        .date-filter-container {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 120px;
+            flex: 1;
+        }
+
+        .filter-label {
+            font-weight: 500;
+            color: #333;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .filter-select,
+        .filter-input {
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            width: 100%;
+            min-width: 100px;
+        }
+
+        .search-input-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+            border: none;
+        }
+
+        select, input[type="text"] {
+            padding: 8px 10px;
+            border: 0.1px solid #ddd
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .clear-search {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 0;
+            margin-left: 5px;
+            font-size: 14px;
+        }
+
+        .clear-search:hover {
+            color: #333;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+            .filter-container {
+                gap: 8px;
+            }
+            
+            .subject-filter-container,
+            .year-filter-container,
+            .major-filter-container,
+            .date-filter-container {
+                min-width: 110px;
+            }
+        }
+
+        @media (max-width: 992px) {
+            .filter-container {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            
+            .subject-filter-container,
+            .year-filter-container,
+            .major-filter-container,
+            .date-filter-container {
+                flex: 1;
+                min-width: 140px;
+            }
+            
+            .search-container {
+                margin-left: 0;
+                width: 100%;
+                justify-content: flex-start;
+            }
+            
+            .search-input {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .filter-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .subject-filter-container,
+            .year-filter-container,
+            .major-filter-container,
+            .date-filter-container {
+                min-width: 100%;
+            }
+            
+            .search-container {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 
@@ -427,6 +636,32 @@ if ($showAttendance && $isValidSubjectForDate) {
                                     <?php endforeach; ?>
                                 </select>
                             </div>
+                            <div class="year-filter-container">
+                                <label for="yearFilter" class="filter-label">
+                                    <i class="fas fa-graduation-cap"></i> Year:
+                                </label>
+                                <select id="yearFilter" class="filter-select">
+                                    <option value="all" <?php echo ($selectedYear === 'all') ? 'selected' : ''; ?>>All Years</option>
+                                    <?php foreach ($academicYears as $year): ?>
+                                        <option value="<?php echo htmlspecialchars($year); ?>" <?php echo ($selectedYear == $year) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($year); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="major-filter-container">
+                                <label for="majorFilter" class="filter-label">
+                                    <i class="fas fa-building"></i> Major:
+                                </label>
+                                <select id="majorFilter" class="filter-select">
+                                    <option value="all" <?php echo ($selectedMajor === 'all') ? 'selected' : ''; ?>>All Majors</option>
+                                    <?php foreach ($majors as $major): ?>
+                                        <option value="<?php echo htmlspecialchars($major['major_id']); ?>" <?php echo ($selectedMajor == $major['major_id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($major['major_name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
                             <div class="date-filter-container">
                                 <label for="dateFilter" class="filter-label">
                                     <i class="fas fa-calendar-alt"></i> Date:
@@ -434,13 +669,18 @@ if ($showAttendance && $isValidSubjectForDate) {
                                 <input type="date" id="dateFilter" class="filter-input"
                                     value="<?php echo $selectedDate; ?>" max="<?php echo date('Y-m-d'); ?>">
                             </div>
-                        </div>
-                        <div class="search-container">
-                            <input type="text" id="studentSearch" class="search-input"
-                                placeholder="Search by student name or ID...">
-                            <button type="button" id="clearSearch" class="clear-search" title="Clear search">
-                                <i class="fas fa-times"></i>
-                            </button>
+                            <div class="search-filter-container">
+                                <label for="studentSearch" class="filter-label">
+                                    <i class="fas fa-search"></i> Search:
+                                </label>
+                                <div class="search-input-container">
+                                    <input type="text" id="studentSearch" class="filter-input search-input"
+                                        placeholder="Student name or ID...">
+                                    <button type="button" id="clearSearch" class="clear-search" title="Clear search">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -611,16 +851,39 @@ if ($showAttendance && $isValidSubjectForDate) {
 
         // Filter change handlers
         document.getElementById('dateFilter').addEventListener('change', function () {
-            const selectedDate = this.value;
-            const selectedSubject = document.getElementById('subjectFilter').value;
-            window.location.href = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
+            updateURLWithFilters();
         });
 
         document.getElementById('subjectFilter').addEventListener('change', function () {
-            const selectedSubject = this.value;
-            const selectedDate = document.getElementById('dateFilter').value;
-            window.location.href = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
+            updateURLWithFilters();
         });
+
+        document.getElementById('yearFilter').addEventListener('change', function () {
+            updateURLWithFilters();
+        });
+
+        document.getElementById('majorFilter').addEventListener('change', function () {
+            updateURLWithFilters();
+        });
+
+        function updateURLWithFilters() {
+            const selectedDate = document.getElementById('dateFilter').value;
+            const selectedSubject = document.getElementById('subjectFilter').value;
+            const selectedYear = document.getElementById('yearFilter').value;
+            const selectedMajor = document.getElementById('majorFilter').value;
+            
+            let url = `attendance.php?date=${selectedDate}&subject=${selectedSubject}`;
+            
+            if (selectedYear !== 'all') {
+                url += `&year=${selectedYear}`;
+            }
+            
+            if (selectedMajor !== 'all') {
+                url += `&major=${selectedMajor}`;
+            }
+            
+            window.location.href = url;
+        }
 
         $(document).ready(function () {
             // --- Pagination Variables ---
@@ -832,6 +1095,8 @@ if ($showAttendance && $isValidSubjectForDate) {
             }
         });
     </script>
+    
+    <?php include '../Includes/logout_confirmation.php'; ?>
 </body>
 
 </html>

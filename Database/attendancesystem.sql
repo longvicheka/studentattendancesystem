@@ -149,6 +149,7 @@ CREATE TABLE tblabsentrequest (
     studentId VARCHAR(11) NOT NULL,
     studentName VARCHAR(50) NOT NULL,
     requestDate DATE NOT NULL,
+    academicYear INT NOT NULL,
     startDate DATE NOT NULL,
     endDate DATE NOT NULL,
     reason TEXT NOT NULL,
@@ -167,7 +168,8 @@ CREATE TABLE tblmajor (
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     createdBy VARCHAR(50) NOT NULL,
     modifiedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    modifiedBy VARCHAR(50) NULL
+    modifiedBy VARCHAR(50) NULL,
+    isDeleted BINARY DEFAULT 0
 );
 
 INSERT INTO tblmajor (major_code, major_name, createdBy) VALUES

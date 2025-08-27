@@ -202,6 +202,8 @@ unset($day);
             </table>
         </div>
     </div>
+    
+    <?php include '../Includes/logout_confirmation.php'; ?>
 </body>
 
 </html>

@@ -26,16 +26,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_request'])) {
     $studentId = $_SESSION['studentId'] ?? '';
     $studentName = $_SESSION['firstName'] . ' ' . $_SESSION['lastName'];
 
+    // Get student's academic year from the database
+    $academicYear = '';
+    $studentQuery = "SELECT academicYear FROM tblstudent WHERE studentId = ?";
+    $studentStmt = $conn->prepare($studentQuery);
+    if ($studentStmt) {
+        $studentStmt->bind_param("s", $studentId);
+        $studentStmt->execute();
+        $studentResult = $studentStmt->get_result();
+        if ($studentResult && $studentRow = $studentResult->fetch_assoc()) {
+            $academicYear = $studentRow['academicYear'] ?? '';
+        }
+        $studentStmt->close();
+    }
+
     if (empty($startDate) || empty($endDate) || empty($reason)) {
         $message = '<div class="alert alert-danger">Please fill in all required fields.</div>';
     } else {
-        // Insert new request
-        $sql = "INSERT INTO tblabsentrequest (studentId, studentName, startDate, endDate, reason, status, createdAt) 
-                VALUES (?, ?, ?, ?, ?, 'pending', NOW())";
+        // Insert new request with academic year
+        $sql = "INSERT INTO tblabsentrequest (studentId, studentName, startDate, endDate, reason, academicYear, status, createdAt) 
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', NOW())";
 
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("sssss", $studentId, $studentName, $startDate, $endDate, $reason);
+            $stmt->bind_param("ssssss", $studentId, $studentName, $startDate, $endDate, $reason, $academicYear);
             if ($stmt->execute()) {
                 $message = '<div class="alert alert-success">Your absence request has been submitted successfully!</div>';
             } else {
@@ -520,4 +534,5 @@ if (!empty($studentId)) {
     </script>
 </body>
 
+<?php include '../Includes/logout_confirmation.php'; ?>
 </html>
